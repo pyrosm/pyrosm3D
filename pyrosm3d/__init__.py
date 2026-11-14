@@ -2,6 +2,7 @@
 
 from importlib.metadata import PackageNotFoundError, version
 
+from pyrosm3d.indoor import IndoorElements, read_indoor
 from pyrosm3d.network import plot_network
 
 try:
@@ -9,4 +10,4 @@ try:
 except PackageNotFoundError:  # running from a source tree without an install
     __version__ = "unknown"
 
-__all__ = ["plot_network"]
+__all__ = ["IndoorElements", "plot_network", "read_indoor"]

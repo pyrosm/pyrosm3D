@@ -35,6 +35,9 @@ _JSON_FIELDS = {"version", "timestamp", "visible", "members"}
 # One part of a level value: a level, such as "-1" or "0.5", or a range, such as "0-2"
 # or "-4--2".
 _LEVEL_PART = re.compile(r"\s*(-?\d+(?:\.\d+)?)(?:\s*-\s*(-?\d+(?:\.\d+)?))?\s*")
+# The most levels that a range of a level value may span; the tallest buildings have
+# fewer than 200 floors.
+_MAX_LEVEL_SPAN = 200
 
 
 def row_tags(frame):
@@ -179,7 +182,8 @@ def level_ranges(value):
     """The levels of an OSM ``level`` value as ``(lowest, highest)`` pairs of floats,
     one for each part separated by a semicolon: ``"-1;0"`` gives ``[(-1.0, -1.0),
     (0.0, 0.0)]`` and ``"0-2"`` gives ``[(0.0, 2.0)]``. Parts that are not a level or a
-    range are skipped; None when no part is."""
+    range, or whose number is too large for a float, are skipped; None when no part
+    is left."""
     if _is_missing(value):
         return None
     ranges = []
@@ -188,8 +192,23 @@ def level_ranges(value):
         if match:
             first = float(match.group(1))
             last = float(match.group(2)) if match.group(2) is not None else first
-            ranges.append((min(first, last), max(first, last)))
+            if math.isfinite(first) and math.isfinite(last):
+                ranges.append((min(first, last), max(first, last)))
     return ranges or None
+
+
+def tag_levels(tags):
+    """The levels of an element with the OSM ``tags``, as a sorted tuple of floats: the
+    ends of each range of its ``level`` tag and the whole levels between them, so
+    ``"0-2"`` gives 0, 1 and 2 and ``"0.5;2"`` gives 0.5 and 2. A range over more than
+    200 levels is a tagging mistake and gives no levels. Empty without a level."""
+    levels = set()
+    for low, high in level_ranges(tags.get("level")) or ():
+        if high - low > _MAX_LEVEL_SPAN:
+            continue
+        levels.update((low, high))
+        levels.update(map(float, range(math.ceil(low), math.floor(high) + 1)))
+    return tuple(sorted(levels))
 
 
 def tag_layer(tags):
