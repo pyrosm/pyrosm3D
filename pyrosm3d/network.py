@@ -23,7 +23,7 @@ _STYLES = {
     "levels": ("Walkways on other levels", "#3987e5", 3.5, "solid"),
     "multi": ("Walkways tagged with several levels", "#3987e5", 3.0, "dot"),
     "escalator": ("Escalators", "#c98500", 6.0, "solid"),
-    "moving_walkway": ("Moving walkways", "#c98500", 6.0, "dash"),
+    "moving_walkway": ("Moving walkways", "#fa8cd7", 6.0, "dash"),
     "stairs": ("Stairs", "#444b55", 5.0, "solid"),
     "lift": ("Lifts", "#8e44ad", 5.0, "dash"),
     "platform": ("Platforms", "#199e70", 5.0, "solid"),

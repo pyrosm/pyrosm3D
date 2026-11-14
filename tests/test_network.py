@@ -4,7 +4,7 @@ import pytest
 from shapely.geometry import LineString, Point
 
 from pyrosm3d import plot_network
-from pyrosm3d.network import _edge_kind, _graph_frames
+from pyrosm3d.network import _STYLES, _edge_kind, _graph_frames
 
 
 def _traces(figure):
@@ -18,7 +18,9 @@ def test_plot_network_draws_an_indoor_network(helsinki_indoor):
     a line, drawn over the edges with markers at its ends, that rises through the lift
     (a step that is not an edge left out, no route without the u and v columns;
     repeated index labels are fine); polygon and line areas are outlines at the level
-    of their JSON tags (the point at the center left out) and entrances markers."""
+    of their JSON tags (the point at the center left out) and entrances markers;
+    stairs, escalators, moving walkways, lifts and platforms each have a colour of
+    their own."""
     osm, nodes, edges = helsinki_indoor
     areas = osm.get_data_by_custom_criteria({"railway": ["platform"]}, keep_nodes=False)
     near = dict(center=(24.9415, 60.1712), radius=200)
@@ -45,6 +47,8 @@ def test_plot_network_draws_an_indoor_network(helsinki_indoor):
     assert traces["Platforms"].line.color == "#199e70"
     assert traces["Stairs"].line.color == "#444b55"
     assert traces["Escalators"].line.color == "#c98500"
+    kinds = ("stairs", "escalator", "moving_walkway", "lift", "platform")
+    assert len({_STYLES[kind][1] for kind in kinds}) == len(kinds)
     names = [trace.name for trace in figure.data]
     assert names.index("Route") > names.index("Platforms")
     area = traces["Area outlines"]
