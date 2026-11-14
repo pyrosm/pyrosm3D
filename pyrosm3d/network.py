@@ -128,6 +128,17 @@ def _edge_kinds(edges):
         yield row, edge_tags, kind, z_u, z_v
 
 
+def _edge_text(row, tags, kind):
+    """The hover text of an edge: its element, its ``highway`` value (else its
+    ``kind``) and its ``level`` tag."""
+    return "%s %s · %s<br>level %s" % (
+        getattr(row, "osm_type", "way"),
+        getattr(row, "id", ""),
+        tags.get("highway", kind),
+        tags.get("level", "not tagged"),
+    )
+
+
 def _line_points(line, z_u, z_v, origin, vertical=False):
     """x, y (metres from ``origin``) and z of the points of ``line``, z running from
     ``z_u`` to ``z_v`` along it; a vertical line at its first point when ``vertical``
@@ -213,13 +224,7 @@ def plot_network(edges, nodes=None, center=None, radius=None, route=None, areas=
     traces = {kind: _Trace() for kind in _STYLES}
     for row, edge_tags, kind, z_u, z_v in _edge_kinds(metric):
         x, y, z = _line_points(row.geometry, z_u, z_v, origin, vertical=kind == "lift")
-        text = "%s %s · %s<br>level %s" % (
-            getattr(row, "osm_type", "way"),
-            getattr(row, "id", ""),
-            edge_tags.get("highway", kind),
-            edge_tags.get("level", "not tagged"),
-        )
-        traces[kind].add(x, y, z, text)
+        traces[kind].add(x, y, z, _edge_text(row, edge_tags, kind))
     ends = {
         (row.u, row.v): (row.geometry, z_u, z_v, kind == "lift")
         for row, _, kind, z_u, z_v in _edge_kinds(on_route)
