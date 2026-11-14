@@ -131,7 +131,7 @@ def _floor_traces(areas, openings, origin):
     polygon of its level in ``openings`` crosses it."""
     floors = {}
     columns = (areas["kind"], areas["levels"], areas["tags"], areas.geometry)
-    for kind, levels, tags, polygon in zip(*columns):
+    for key, kind, levels, tags, polygon in zip(element_keys(areas), *columns):
         if kind not in AREA_STYLES:
             continue
         name = tags.get("name") or tags.get("ref") or AREA_STYLES[kind][2]
@@ -140,16 +140,53 @@ def _floor_traces(areas, openings, origin):
             if level in openings and polygon.intersects(openings[level]):
                 floor = polygon.difference(openings[level])
             corners = triangles(floor).reshape(-1, 2) - origin
-            xy, text = floors.setdefault((kind, level), ([], []))
+            xy, text, keys = floors.setdefault((kind, level), ([], [], []))
             xy.append(corners)
             text += ["%s<br>level %g" % (name, level)] * len(corners)
+            keys += [key] * len(corners)
     traces = []
     for kind, (name, colour, _) in AREA_STYLES.items():
-        for level in sorted(level for key, level in floors if key == kind):
-            xy, text = floors[(kind, level)]
+        for level in sorted(level for found, level in floors if found == kind):
+            xy, text, keys = floors[(kind, level)]
             floor = _floor_mesh(xy, level, colour, name, legendgroup=name)
-            traces.append(floor.update(hoverinfo="text", hovertext=text))
+            floor.update(hoverinfo="text", hovertext=text, customdata=keys)
+            traces.append(floor)
     return traces
+
+
+def element_keys(frame):
+    """A key such as ``"way 123"`` for each row of ``frame``: its ``osm_type`` (way
+    without the column) and ``id``. The traces of :func:`plot_indoor` carry the key of
+    the element at each of their points as ``customdata``."""
+    types = frame["osm_type"] if "osm_type" in frame.columns else ["way"] * len(frame)
+    return ["%s %s" % element for element in zip(types, frame["id"])]
+
+
+class _LevelLines:
+    """The lines of one legend entry, grouped by the levels they are shown on."""
+
+    def __init__(self):
+        self.by_levels = {}
+        self.keys = {}
+
+    def add(self, levels, x, y, z, text, key=None):
+        """Add a line through the points ``x``, ``y``, ``z`` that is shown on
+        ``levels``, labelled ``text``, of the element with the ``key``."""
+        levels = tuple(levels)
+        self.by_levels.setdefault(levels, _Trace()).add(x, y, z, text)
+        self.keys.setdefault(levels, []).extend([key] * len(x) + [None])
+
+    def traces(self, name, colour, width, dash="solid"):
+        """A plotly line trace for each set of levels, lowest first, with the keys of
+        the elements as ``customdata`` where lines have them."""
+        traces = []
+        for levels in sorted(self.by_levels):
+            trace = _lines(self.by_levels[levels], name, colour, width, dash)
+            trace.update(meta={"levels": list(levels)})
+            if any(self.keys[levels]):
+                trace.update(customdata=self.keys[levels])
+            traces.append(trace)
+        return traces
 
 
 def _floor_mesh(corners, level, colour, name, lift=0.0, **more):
@@ -259,26 +296,6 @@ def _column_traces(indoor, origin):
     return traces
 
 
-class _LevelLines:
-    """The lines of one legend entry, grouped by the levels they are shown on."""
-
-    def __init__(self):
-        self.by_levels = {}
-
-    def add(self, levels, x, y, z, text):
-        """Add a line through the points ``x``, ``y``, ``z`` that is shown on
-        ``levels``, labelled ``text``."""
-        self.by_levels.setdefault(tuple(levels), _Trace()).add(x, y, z, text)
-
-    def traces(self, name, colour, width, dash="solid"):
-        """A plotly line trace for each set of levels, lowest first."""
-        traces = []
-        for levels in sorted(self.by_levels):
-            trace = _lines(self.by_levels[levels], name, colour, width, dash)
-            traces.append(trace.update(meta={"levels": list(levels)}))
-        return traces
-
-
 def _outline_traces(areas, origin):
     """The outlines of the ``areas`` as lines: of those that have a floor, on each
     level of their floors, and of the level outlines, on each of their levels."""
@@ -305,12 +322,13 @@ def _network_traces(edges, origin):
     the levels at its two ends, and for a level between two floors the nearest
     floor."""
     lines = {kind: _LevelLines() for kind in _STYLES}
-    for row, tags, kind, level_u, level_v in _edge_kinds(edges):
+    kinds = zip(element_keys(edges), _edge_kinds(edges))
+    for key, (row, tags, kind, level_u, level_v) in kinds:
         z_u, z_v = (lv * FLOOR_HEIGHT + _NETWORK_LIFT for lv in (level_u, level_v))
         points = _line_points(row.geometry, z_u, z_v, origin, vertical=kind == "lift")
         ends = {float(level_u), float(level_v)}
         shown = sorted(ends | {float(math.floor(end + 0.5)) for end in ends})
-        lines[kind].add(shown, *points, _edge_text(row, tags, kind))
+        lines[kind].add(shown, *points, _edge_text(row, tags, kind), key)
     traces = []
     for kind, (name, colour, width, dash) in _STYLES.items():
         traces += lines[kind].traces(name, colour, width, dash)
@@ -323,20 +341,23 @@ def _marker_traces(points, style, lift, origin):
     ``style`` is ``DOOR_STYLE`` or ``POI_STYLE``."""
     name, colour, symbol, fallback = style
     by_level = {}
-    for levels, tags, point in zip(points["levels"], points["tags"], points.geometry):
+    columns = (points["levels"], points["tags"], points.geometry)
+    for key, levels, tags, point in zip(element_keys(points), *columns):
         label = tags.get("name") or tags.get("shop") or tags.get("amenity") or fallback
         for level in levels:
             if float(level).is_integer():
-                x, y, text = by_level.setdefault(level, ([], [], []))
+                x, y, text, keys = by_level.setdefault(level, ([], [], [], []))
                 x.append(round(point.x - origin[0], 2))
                 y.append(round(point.y - origin[1], 2))
                 text.append("%s<br>level %g" % (label, level))
+                keys.append(key)
     return [
         go.Scatter3d(
             x=x,
             y=y,
             z=[level * FLOOR_HEIGHT + lift] * len(x),
             text=text,
+            customdata=keys,
             mode="markers",
             name=name,
             legendgroup=name,
@@ -345,8 +366,30 @@ def _marker_traces(points, style, lift, origin):
             hovertemplate="%{text}<extra></extra>",
             meta={"levels": [level]},
         )
-        for level, (x, y, text) in sorted(by_level.items())
+        for level, (x, y, text, keys) in sorted(by_level.items())
     ]
+
+
+def level_views(figure):
+    """``{level: scene}`` for each whole level of ``figure``, a figure of
+    :func:`plot_indoor` with all levels: the range and the ticks of the vertical axis
+    and the aspect ratio of the scene that ``plot_indoor(level=...)`` gives that
+    level, as plotly's ``relayout`` takes them."""
+    scene = figure.layout.scene
+    (west, east), (south, north) = scene.xaxis.range, scene.yaxis.range
+    on_levels = [trace.meta["levels"] for trace in figure.data]
+    whole = {lv for levels in on_levels for lv in levels if float(lv).is_integer()}
+    views = {}
+    for level in sorted(whole):
+        shown = sorted({lv for levels in on_levels if level in levels for lv in levels})
+        scene = _layout((west, south, east, north), shown)["scene"]
+        views[level] = {
+            "scene.zaxis.range": scene["zaxis"]["range"],
+            "scene.zaxis.tickvals": scene["zaxis"]["tickvals"],
+            "scene.zaxis.ticktext": scene["zaxis"]["ticktext"],
+            "scene.aspectratio": scene["aspectratio"],
+        }
+    return views
 
 
 def _layout(box, levels):
