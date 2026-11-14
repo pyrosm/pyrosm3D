@@ -1,0 +1,5 @@
+graft pyrosm3d
+graft ci
+graft tests
+include pyproject.toml
+global-exclude __pycache__/*

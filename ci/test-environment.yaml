@@ -1,0 +1,25 @@
+name: test
+
+channels:
+  - conda-forge
+
+dependencies:
+  # required
+  - pip
+  - setuptools>=77
+  - geopandas
+  - shapely>=2.1
+  - plotly
+  # pyrosm, built from its main branch
+  - cython
+  - protobuf>=6.33.5
+  - python-rapidjson
+  - certifi
+  - tqdm>=4.66
+  - pyarrow>=19.0.1
+  # optional
+  - networkx
+  - python-igraph
+  # testing
+  - pytest
+  - pytest-cov
