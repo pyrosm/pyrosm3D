@@ -25,7 +25,10 @@ classifiers = [
     "Topic :: Scientific/Engineering :: GIS",
     "Topic :: Scientific/Engineering :: Visualization",
 ]
-dependencies = []
+dependencies = [
+    "numpy",
+    "pandas",
+]
 
 [project.urls]
 Repository = "https://github.com/pyrosm/pyrosm3D"
