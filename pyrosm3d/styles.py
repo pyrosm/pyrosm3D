@@ -6,6 +6,12 @@ FLOOR_HEIGHT = 4.0
 WALL_HEIGHT = 0.4 * FLOOR_HEIGHT
 # Metres drawn around the indoor areas
 VIEW_MARGIN = 10.0
+# Metres of floor left open across the stairs, escalators and moving walkways that
+# rise through it. OSM has no widths for them: 1.6 m is about the overall width of an
+# escalator with a 1 m step, and the width of stairs is assumed.
+OPENING_WIDTHS = {"escalator": 1.6, "moving_walkway": 1.6, "stairs": 2.0}
+# Metres of floor kept as a landing where a climb ends
+LANDING = 1.0
 
 # (name in the legend, colour of the floor, name in the hover text) of each kind of
 # area that has a floor, in drawing order

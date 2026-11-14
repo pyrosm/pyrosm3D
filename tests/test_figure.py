@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from pyrosm3d import plot_indoor
-from pyrosm3d.floors import floor_levels
+from pyrosm3d.floors import floor_levels, floor_openings
 from pyrosm3d.styles import AREA_STYLES
 
 
@@ -83,6 +83,33 @@ def test_plot_indoor_draws_one_level(maunula):
     assert (tuple(axis.range), axis.ticktext) == ((1.0, 6.0), ("1",))
     with pytest.raises(ValueError, match="nothing to draw on level 5"):
         plot_indoor(maunula, level=5)
+
+
+def test_plot_indoor_opens_floors_for_stairs(maunula):
+    """Where stairs climb from the first to the second floor, the floors of the second
+    floor are open along them: they are drawn smaller by what the opening takes of
+    the areas."""
+    edges = maunula.edges.copy()
+    on_second = (edges["u_level"] == 2) & (edges["v_level"] == 2)
+    row = edges.index[on_second & (edges.length > 5)][0]
+    edges.loc[row, "u_level"] = 1.0
+    edges.loc[row, "vertical"] = "stairs"
+    opening = floor_openings(edges.loc[[row]])[2.0]
+    areas = maunula.areas
+    has_floor = [
+        kind in AREA_STYLES and 2.0 in floor_levels(kind, levels)
+        for kind, levels in zip(areas["kind"], areas["levels"])
+    ]
+    taken = areas[has_floor].intersection(opening).area.sum()
+    assert taken > 1
+
+    def second_floor(figure):
+        floors = [t for t in figure.data if t.type == "mesh3d"]
+        return sum(_floor_area(t) for t in floors if t.meta["levels"] == [2.0])
+
+    closed = second_floor(plot_indoor(maunula))
+    opened = second_floor(plot_indoor(replace(maunula, edges=edges)))
+    assert closed - opened == pytest.approx(taken, rel=0.01)
 
 
 def test_plot_indoor_without_areas(maunula):

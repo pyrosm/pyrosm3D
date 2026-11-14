@@ -1,8 +1,9 @@
 """A 3D view of the indoor elements of a place, drawn with plotly.
 
 The floors of the areas are plates at the height of their level, 4 m for each level,
-with the outlines of the areas, the walking network, and the doors and shops as
-markers. Every trace is shown on the levels in its ``meta["levels"]``.
+open where stairs, an escalator or a moving walkway rises through them, with the
+outlines of the areas, the walking network, and the doors and shops as markers. Every
+trace is shown on the levels in its ``meta["levels"]``.
 """
 
 import math
@@ -11,7 +12,7 @@ import numpy as np
 import plotly.graph_objects as go
 import shapely
 
-from pyrosm3d.floors import floor_levels, triangles
+from pyrosm3d.floors import floor_levels, floor_openings, triangles
 from pyrosm3d.network import (
     _STYLES,
     _Trace,
@@ -62,10 +63,11 @@ def plot_indoor(indoor, level=None):
     origin = ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
     doors = indoor.doors[indoor.doors.within(view)]
     pois = indoor.pois[indoor.pois.within(view)]
+    edges = indoor.edges[indoor.edges.intersects(view)]
     traces = (
-        _floor_traces(indoor.areas, origin)
+        _floor_traces(indoor.areas, floor_openings(edges), origin)
         + _outline_traces(indoor.areas, origin)
-        + _network_traces(indoor.edges[indoor.edges.intersects(view)], origin)
+        + _network_traces(edges, origin)
         + _marker_traces(doors, DOOR_STYLE, WALL_HEIGHT / 2, origin)
         + _marker_traces(pois, POI_STYLE, _POI_LIFT, origin)
     )
@@ -99,17 +101,21 @@ def _view_box(indoor):
     )
 
 
-def _floor_traces(areas, origin):
+def _floor_traces(areas, openings, origin):
     """The floors of ``areas`` as meshes of triangles, one for each kind of area and
-    level, the kinds in the order of ``AREA_STYLES``."""
+    level, the kinds in the order of ``AREA_STYLES``; a floor is open where the
+    polygon of its level in ``openings`` crosses it."""
     floors = {}
     columns = (areas["kind"], areas["levels"], areas["tags"], areas.geometry)
     for kind, levels, tags, polygon in zip(*columns):
         if kind not in AREA_STYLES:
             continue
-        corners = triangles(polygon).reshape(-1, 2) - origin
         name = tags.get("name") or tags.get("ref") or AREA_STYLES[kind][2]
         for level in floor_levels(kind, levels):
+            floor = polygon
+            if level in openings and polygon.intersects(openings[level]):
+                floor = polygon.difference(openings[level])
+            corners = triangles(floor).reshape(-1, 2) - origin
             xy, text = floors.setdefault((kind, level), ([], []))
             xy.append(corners)
             text += ["%s<br>level %g" % (name, level)] * len(corners)
