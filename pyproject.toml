@@ -26,8 +26,11 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Visualization",
 ]
 dependencies = [
+    "geopandas>=0.12.0",
     "numpy",
     "pandas",
+    "plotly",
+    "shapely>=2.1",
 ]
 
 [project.urls]
