@@ -50,8 +50,21 @@ def test_plot_indoor_draws_maunula_talo(maunula):
     assert set(_levels(traces, "Lines across areas")) == {0.0, 1.0, 2.0}
     assert set(_levels(traces, "Platforms")) == {0.0}
 
-    listed = [trace.name for trace in traces if trace.showlegend]
-    assert listed == list(dict.fromkeys(trace.name for trace in traces))
+    listed = [trace.legendgroup for trace in traces if trace.showlegend]
+    assert listed == list(dict.fromkeys(trace.legendgroup for trace in traces))
+    walls = [t for t in traces if t.name == "Walls (rooms and indoor=wall)"]
+    assert [wall.meta["levels"] for wall in walls] == [[0.0], [1.0], [2.0]]
+    assert [(min(wall.z), max(wall.z)) for wall in walls][1] == (4.0, 5.6)
+    assert len(walls[1].i) == 2 * len(walls[1].x) / 4
+    outer = [t for t in traces if t.legendgroup.startswith("Outer walls")]
+    assert {trace.visible for trace in outer} == {"legendonly"}
+    assert [trace.name for trace in outer if trace.showlegend] == [outer[0].name]
+    outlines = [trace for trace in traces if trace.name == "Level outlines"]
+    assert [outline.meta["levels"] for outline in outlines] == [[0.0], [1.0], [2.0]]
+    assert {z for z in outlines[2].z if z is not None} == {8.1}
+    level_floors = _levels(traces, "Level floors")
+    assert set(level_floors) == {0.0, 1.0, 2.0}
+    assert {t.z[0] for t in outer if t.name == "Level floors"} == {-0.05, 3.95, 7.95}
     doors = [trace for trace in traces if trace.name == "Doors and entrances"]
     assert _levels(traces, "Doors and entrances") == {0.0: 1, 1.0: 39, 2.0: 29}
     assert _levels(traces, "Shops and amenities") == {0.0: 1, 1.0: 5, 2.0: 3}
@@ -113,11 +126,19 @@ def test_plot_indoor_opens_floors_for_stairs(maunula):
 
 
 def test_plot_indoor_without_areas(maunula):
-    """Without areas the view is the network; without a network too there is nothing
-    to draw."""
+    """Without areas the view is the network, and a wall mapped as a line is still
+    drawn, unless it lies outside the view; without a network too there is nothing to
+    draw."""
     no_areas = replace(maunula, areas=maunula.areas.iloc[:0])
     figure = plot_indoor(no_areas)
+    meshes = [trace.name for trace in figure.data if trace.type == "mesh3d"]
+    assert meshes == ["Walls (rooms and indoor=wall)"]
+    far = maunula.walls.assign(levels=[(7.0,)])
+    far.geometry = far.translate(5000, 0)
+    figure = plot_indoor(replace(no_areas, walls=far))
     assert {trace.type for trace in figure.data} == {"scatter3d"}
+    with pytest.raises(ValueError, match="nothing to draw on level 7"):
+        plot_indoor(replace(maunula, walls=far), level=7)
     assert "Walkways at street level" in [trace.name for trace in figure.data]
     with pytest.raises(ValueError, match="no areas and no network"):
         plot_indoor(replace(no_areas, edges=maunula.edges.iloc[:0]))

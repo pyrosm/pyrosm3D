@@ -2,11 +2,15 @@
 
 The floors of the areas are plates at the height of their level, 4 m for each level,
 open where stairs, an escalator or a moving walkway rises through them, with the
-outlines of the areas, the walking network, and the doors and shops as markers. Every
-trace is shown on the levels in its ``meta["levels"]``.
+outlines of the areas and of the levels, the walking network, and the doors and shops
+as markers. The walls of rooms, and walls mapped as lines or areas, are see-through
+panels cut away at 40 % of a storey, with a gap at each door; outer walls stand a full
+storey high along the outlines of levels, or of buildings without them. Every trace is
+shown on the levels in its ``meta["levels"]``.
 """
 
 import math
+from dataclasses import replace
 
 import numpy as np
 import plotly.graph_objects as go
@@ -25,14 +29,21 @@ from pyrosm3d.styles import (
     AREA_STYLES,
     DOOR_STYLE,
     FLOOR_HEIGHT,
+    LEVEL_FLOOR_COLOUR,
+    LEVEL_OUTLINE_COLOUR,
+    OUTER_WALL_NAME,
     OUTLINE_COLOUR,
     POI_STYLE,
     VIEW_MARGIN,
     WALL_HEIGHT,
+    WALL_NAME,
+    WALL_STYLE,
 )
+from pyrosm3d.walls import inner_walls, outer_walls
 
 # Metres that outlines and network lines are drawn above their floor, to stay visible
 _OUTLINE_LIFT = 0.05
+_LEVEL_OUTLINE_LIFT = 0.1
 _NETWORK_LIFT = 0.15
 _POI_LIFT = 0.3
 # A floor keeps its colour from every direction
@@ -55,21 +66,29 @@ def plot_indoor(indoor, level=None):
     Returns
     -------
     plotly.graph_objects.Figure
-        A click on a legend entry hides or shows it. The doors and the shops are
-        hidden until they are picked in the legend.
+        A click on a legend entry hides or shows it. The outer walls, the doors and
+        the shops are hidden until they are picked in the legend.
     """
     box = _view_box(indoor)
     view = shapely.box(*box)
     origin = ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
-    doors = indoor.doors[indoor.doors.within(view)]
-    pois = indoor.pois[indoor.pois.within(view)]
-    edges = indoor.edges[indoor.edges.intersects(view)]
+    indoor = replace(
+        indoor,
+        walls=indoor.walls[indoor.walls.intersects(view)],
+        doors=indoor.doors[indoor.doors.within(view)],
+        pois=indoor.pois[indoor.pois.within(view)],
+        edges=indoor.edges[indoor.edges.intersects(view)],
+    )
+    outer, level_floors = outer_walls(indoor, view)
     traces = (
-        _floor_traces(indoor.areas, floor_openings(edges), origin)
+        _floor_traces(indoor.areas, floor_openings(indoor.edges), origin)
         + _outline_traces(indoor.areas, origin)
-        + _network_traces(edges, origin)
-        + _marker_traces(doors, DOOR_STYLE, WALL_HEIGHT / 2, origin)
-        + _marker_traces(pois, POI_STYLE, _POI_LIFT, origin)
+        + _wall_traces(inner_walls(indoor), WALL_NAME, origin)
+        + _wall_traces(outer, OUTER_WALL_NAME, origin, hidden=True)
+        + _level_floor_traces(level_floors, origin)
+        + _network_traces(indoor.edges, origin)
+        + _marker_traces(indoor.doors, DOOR_STYLE, WALL_HEIGHT / 2, origin)
+        + _marker_traces(indoor.pois, POI_STYLE, _POI_LIFT, origin)
     )
     if level is not None:
         traces = [trace for trace in traces if level in trace.meta["levels"]]
@@ -123,26 +142,68 @@ def _floor_traces(areas, openings, origin):
     for kind, (name, colour, _) in AREA_STYLES.items():
         for level in sorted(level for key, level in floors if key == kind):
             xy, text = floors[(kind, level)]
-            xy = np.round(np.concatenate(xy), 2)
-            corner = np.arange(len(xy)).reshape(-1, 3)
-            traces.append(
-                go.Mesh3d(
-                    x=xy[:, 0],
-                    y=xy[:, 1],
-                    z=np.full(len(xy), level * FLOOR_HEIGHT),
-                    i=corner[:, 0],
-                    j=corner[:, 1],
-                    k=corner[:, 2],
-                    color=colour,
-                    name=name,
-                    legendgroup=name,
-                    flatshading=True,
-                    lighting=_FLAT_LIGHT,
-                    hoverinfo="text",
-                    hovertext=text,
-                    meta={"levels": [level]},
-                )
+            floor = _floor_mesh(xy, level, colour, name, legendgroup=name)
+            traces.append(floor.update(hoverinfo="text", hovertext=text))
+    return traces
+
+
+def _floor_mesh(corners, level, colour, name, lift=0.0, **more):
+    """A flat mesh of the triangles whose corners are in ``corners`` (xy arrays, three
+    rows for a triangle), ``lift`` metres above the height of ``level``."""
+    xy = np.round(np.concatenate(corners), 2)
+    corner = np.arange(len(xy)).reshape(-1, 3)
+    return go.Mesh3d(
+        x=xy[:, 0],
+        y=xy[:, 1],
+        z=np.full(len(xy), level * FLOOR_HEIGHT + lift),
+        i=corner[:, 0],
+        j=corner[:, 1],
+        k=corner[:, 2],
+        color=colour,
+        name=name,
+        flatshading=True,
+        lighting=_FLAT_LIGHT,
+        hoverinfo="skip",
+        meta={"levels": [level]},
+        **more,
+    )
+
+
+def _level_floor_traces(floors, origin):
+    """The floors under the outer walls (``{level: polygons}``) as meshes just below
+    the other floors, hidden and shown with the outer walls."""
+    traces = []
+    for level in sorted(floors):
+        corners = [triangles(floor).reshape(-1, 2) - origin for floor in floors[level]]
+        floor = _floor_mesh(corners, level, LEVEL_FLOOR_COLOUR, "Level floors", -0.05)
+        traces.append(floor.update(legendgroup=OUTER_WALL_NAME, visible="legendonly"))
+    return traces
+
+
+def _wall_traces(walls, name, origin, hidden=False):
+    """The walls of each level (``{level: panels}``, see
+    :func:`pyrosm3d.walls.wall_panels`) as see-through meshes called ``name``, two
+    triangles for a panel; ``hidden`` until picked in the legend."""
+    traces = []
+    for level in sorted(walls):
+        corners = walls[level].reshape(-1, 3)
+        first = np.arange(0, len(corners), 4)
+        traces.append(
+            go.Mesh3d(
+                x=np.round(corners[:, 0] - origin[0], 2),
+                y=np.round(corners[:, 1] - origin[1], 2),
+                z=corners[:, 2],
+                i=np.r_[first, first],
+                j=np.r_[first + 1, first + 2],
+                k=np.r_[first + 2, first + 3],
+                name=name,
+                legendgroup=name,
+                hoverinfo="skip",
+                visible="legendonly" if hidden else True,
+                meta={"levels": [level]},
+                **WALL_STYLE,
             )
+        )
     return traces
 
 
@@ -167,17 +228,22 @@ class _LevelLines:
 
 
 def _outline_traces(areas, origin):
-    """The outlines of the ``areas`` that have a floor, on each level of their
-    floors."""
-    lines = _LevelLines()
-    for kind, levels, polygon in zip(areas["kind"], areas["levels"], areas.geometry):
-        if kind not in AREA_STYLES:
+    """The outlines of the ``areas`` as lines: of those that have a floor, on each
+    level of their floors, and of the level outlines, on each of their levels."""
+    rooms, levels = _LevelLines(), _LevelLines()
+    for kind, on_levels, area in zip(areas["kind"], areas["levels"], areas.geometry):
+        if kind == "level":
+            lines, lift = levels, _LEVEL_OUTLINE_LIFT
+        elif kind in AREA_STYLES:
+            lines, lift, on_levels = rooms, _OUTLINE_LIFT, floor_levels(kind, on_levels)
+        else:
             continue
-        for level in floor_levels(kind, levels):
-            z = level * FLOOR_HEIGHT + _OUTLINE_LIFT
-            for ring in shapely.get_rings(shapely.get_parts(polygon)):
+        for level in on_levels:
+            z = level * FLOOR_HEIGHT + lift
+            for ring in shapely.get_rings(shapely.get_parts(area)):
                 lines.add([level], *_line_points(ring, z, z, origin), "outline")
-    traces = lines.traces("Room and corridor outlines", OUTLINE_COLOUR, 1.5)
+    traces = rooms.traces("Room and corridor outlines", OUTLINE_COLOUR, 1.5)
+    traces += levels.traces("Level outlines", LEVEL_OUTLINE_COLOUR, 2.5)
     return [trace.update(hoverinfo="skip", hovertemplate=None) for trace in traces]
 
 
