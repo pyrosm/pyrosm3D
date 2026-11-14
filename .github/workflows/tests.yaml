@@ -1,0 +1,87 @@
+name: test
+on:
+  # Run on pushes to the default branch and on PRs. Scoping push to main
+  # avoids the duplicate push+pull_request runs on every PR branch.
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Linting code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+      - name: Install Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install black and flake8
+        run: python -m pip install black flake8
+      - name: Lint using black
+        run: python -m black --check pyrosm3d
+      - name: Lint using flake8
+        run: python -m flake8 pyrosm3d
+
+  test:
+    name: Run tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    needs: lint
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash -l {0}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.11"
+          - os: ubuntu-latest
+            python: "3.14"
+          - os: macos-latest
+            python: "3.14"
+          - os: windows-latest
+            python: "3.14"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install Conda environment with Micromamba
+        uses: mamba-org/setup-micromamba@v1
+        with:
+          environment-file: ci/test-environment.yaml
+          create-args: python=${{ matrix.python }}
+
+      - name: Install pyrosm from its main branch
+        # The indoor reads are not in a pyrosm release yet. Build the Cython
+        # extensions against the conda-provided Cython.
+        run: pip install --no-build-isolation "pyrosm @ git+https://github.com/pyrosm/pyrosm@main"
+
+      - name: Install pyrosm3d
+        run: pip install -e . --no-build-isolation
+
+      - name: Check environment
+        run: |
+          micromamba info
+          micromamba list
+
+      - name: Test pyrosm3d
+        run: pytest -v -r s --color=yes --cov=pyrosm3d --cov-report term-missing --cov-report xml tests/
+
+      - name: Update codecov.io
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          # Coverage upload is informational; a transient Codecov problem
+          # (e.g. a 429 rate limit) must not fail the test job.
+          fail_ci_if_error: false

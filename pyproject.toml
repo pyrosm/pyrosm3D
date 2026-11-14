@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyrosm3d"
+version = "0.1.0.dev0"
+description = "3D views of the OpenStreetMap elements that pyrosm reads with their levels."
+readme = "README.md"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+authors = [{ name = "Henrikki Tenkanen" }]
+requires-python = ">=3.11"
+keywords = ["OpenStreetMap", "pyrosm", "indoor", "3D", "plotly", "GeoDataFrame"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/pyrosm/pyrosm3D"
+"Issue Tracker" = "https://github.com/pyrosm/pyrosm3D/issues"
+
+[tool.setuptools.packages.find]
+include = ["pyrosm3d*"]
+
+[tool.black]
+target-version = ["py311", "py312", "py313", "py314"]

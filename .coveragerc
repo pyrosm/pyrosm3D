@@ -1,0 +1,9 @@
+[run]
+branch = true
+source =
+    pyrosm3d
+    tests
+
+[report]
+show_missing = true
+precision = 2
