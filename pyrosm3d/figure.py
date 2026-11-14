@@ -5,8 +5,9 @@ open where stairs, an escalator or a moving walkway rises through them, with the
 outlines of the areas and of the levels, the walking network, and the doors and shops
 as markers. The walls of rooms, and walls mapped as lines or areas, are see-through
 panels cut away at 40 % of a storey, with a gap at each door; outer walls stand a full
-storey high along the outlines of levels, or of buildings without them. Every trace is
-shown on the levels in its ``meta["levels"]``.
+storey high along the outlines of levels, or of buildings without them. Stairwells and
+lift shafts are columns through the floors that they join. Every trace is shown on the
+levels in its ``meta["levels"]``; a column has none and is drawn only with all levels.
 """
 
 import math
@@ -16,6 +17,7 @@ import numpy as np
 import plotly.graph_objects as go
 import shapely
 
+from pyrosm3d.columns import shaft_columns
 from pyrosm3d.floors import floor_levels, floor_openings, triangles
 from pyrosm3d.network import (
     _STYLES,
@@ -27,6 +29,7 @@ from pyrosm3d.network import (
 )
 from pyrosm3d.styles import (
     AREA_STYLES,
+    COLUMN_STYLES,
     DOOR_STYLE,
     FLOOR_HEIGHT,
     LEVEL_FLOOR_COLOUR,
@@ -39,7 +42,7 @@ from pyrosm3d.styles import (
     WALL_NAME,
     WALL_STYLE,
 )
-from pyrosm3d.walls import inner_walls, outer_walls
+from pyrosm3d.walls import inner_walls, outer_walls, wall_panels
 
 # Metres that outlines and network lines are drawn above their floor, to stay visible
 _OUTLINE_LIFT = 0.05
@@ -61,7 +64,8 @@ def plot_indoor(indoor, level=None):
         The elements that :func:`pyrosm3d.read_indoor` returns. The figure shows the
         areas and what lies within 10 m of them.
     level : float (optional)
-        Draw only what is on this level; by default all levels.
+        Draw only what is on this level, without the columns of stairwells and lift
+        shafts; by default all levels.
 
     Returns
     -------
@@ -86,6 +90,7 @@ def plot_indoor(indoor, level=None):
         + _wall_traces(inner_walls(indoor), WALL_NAME, origin)
         + _wall_traces(outer, OUTER_WALL_NAME, origin, hidden=True)
         + _level_floor_traces(level_floors, origin)
+        + _column_traces(indoor, origin)
         + _network_traces(indoor.edges, origin)
         + _marker_traces(indoor.doors, DOOR_STYLE, WALL_HEIGHT / 2, origin)
         + _marker_traces(indoor.pois, POI_STYLE, _POI_LIFT, origin)
@@ -204,6 +209,53 @@ def _wall_traces(walls, name, origin, hidden=False):
                 **WALL_STYLE,
             )
         )
+    return traces
+
+
+def _column_traces(indoor, origin):
+    """The stairwells and the lift shafts of ``indoor`` as see-through columns, a
+    trace for each of the two (see :func:`pyrosm3d.columns.shaft_columns`): walls
+    along a column's outline from its lowest floor to wall height on its highest, and
+    a lid. A column passes through several levels, so its trace has no level."""
+    traces = []
+    for room, (name, colour, fallback) in COLUMN_STYLES.items():
+        corners, text, i, j, k = [], [], [], [], []
+        for outline, bottom, top, levels, names in shaft_columns(indoor, room):
+            z_low, z_high = bottom * FLOOR_HEIGHT, top * FLOOR_HEIGHT + WALL_HEIGHT
+            ring = shapely.get_coordinates(outline.exterior)
+            sides = wall_panels(ring, np.empty((0, 2)), z_low, z_high).reshape(-1, 3)
+            lid = triangles(outline).reshape(-1, 2)
+            lid = np.column_stack([lid, np.full(len(lid), z_high)])
+            side = len(text) + np.arange(0, len(sides), 4)
+            top_corner = len(text) + len(sides) + np.arange(0, len(lid), 3)
+            i += [*side, *side, *top_corner]
+            j += [*(side + 1), *(side + 2), *(top_corner + 1)]
+            k += [*(side + 2), *(side + 3), *(top_corner + 2)]
+            corners += [sides, lid]
+            on_levels = ", ".join("%g" % level for level in levels)
+            label = "%s<br>level %s" % (", ".join(names) or fallback, on_levels)
+            text += [label] * (len(sides) + len(lid))
+        if corners:
+            xyz = np.concatenate(corners)
+            traces.append(
+                go.Mesh3d(
+                    x=np.round(xyz[:, 0] - origin[0], 2),
+                    y=np.round(xyz[:, 1] - origin[1], 2),
+                    z=xyz[:, 2],
+                    i=i,
+                    j=j,
+                    k=k,
+                    color=colour,
+                    opacity=0.3,
+                    name=name,
+                    legendgroup=name,
+                    flatshading=True,
+                    lighting=_FLAT_LIGHT,
+                    hoverinfo="text",
+                    hovertext=text,
+                    meta={"levels": []},
+                )
+            )
     return traces
 
 

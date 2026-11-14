@@ -39,6 +39,16 @@ WALL_STYLE = dict(
     lighting=dict(ambient=0.55, diffuse=0.7, specular=0.05, roughness=0.9, fresnel=0),
     lightposition=dict(x=1000, y=-2000, z=3000),
 )
+# (name in the legend, colour, name in the hover text) of the columns of each kind of
+# shaft
+COLUMN_STYLES = {
+    "stairs": ("Stairwells (room=stairs)", "#e07b5f", "stairwell"),
+    "elevator": (
+        "Lift shafts (room=elevator or highway=elevator)",
+        "#9b59c6",
+        "lift shaft",
+    ),
+}
 # The floor of a level or building outline, drawn under its outer walls
 LEVEL_FLOOR_COLOUR = "#ebe9e4"
 # (name in the legend, colour, marker symbol, name in the hover text) of the markers

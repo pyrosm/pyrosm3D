@@ -59,6 +59,15 @@ def test_plot_indoor_draws_maunula_talo(maunula):
     outer = [t for t in traces if t.legendgroup.startswith("Outer walls")]
     assert {trace.visible for trace in outer} == {"legendonly"}
     assert [trace.name for trace in outer if trace.showlegend] == [outer[0].name]
+    columns = [trace for trace in traces if not trace.meta["levels"]]
+    assert [trace.name.split(" (")[0] for trace in columns] == [
+        "Stairwells",
+        "Lift shafts",
+    ]
+    assert [(min(trace.z), max(trace.z)) for trace in columns] == [
+        (4.0, 9.6),
+        (0.0, 9.6),
+    ]
     outlines = [trace for trace in traces if trace.name == "Level outlines"]
     assert [outline.meta["levels"] for outline in outlines] == [[0.0], [1.0], [2.0]]
     assert {z for z in outlines[2].z if z is not None} == {8.1}
