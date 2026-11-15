@@ -25,7 +25,7 @@ def _run_page(path, entry, clicked, size="wide"):
         pytest.skip("node is not installed")
     harness = Path(__file__).parent / "page_harness.js"
     command = [node, str(harness), str(path), entry, clicked, size]
-    done = subprocess.run(command, capture_output=True, text=True, check=True)
+    done = subprocess.run(command, capture_output=True, encoding="utf-8", check=True)
     return json.loads(done.stdout)
 
 
