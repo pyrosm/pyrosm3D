@@ -215,20 +215,6 @@ def level_ranges(value):
     return ranges or None
 
 
-def tag_levels(tags):
-    """The levels of an element with the OSM ``tags``, as a sorted tuple of floats: the
-    ends of each range of its ``level`` tag and the whole levels between them, so
-    ``"0-2"`` gives 0, 1 and 2 and ``"0.5;2"`` gives 0.5 and 2. A range over more than
-    200 levels is a tagging mistake and gives no levels. Empty without a level."""
-    levels = set()
-    for low, high in level_ranges(tags.get("level")) or ():
-        if high - low > _MAX_LEVEL_SPAN:
-            continue
-        levels.update((low, high))
-        levels.update(map(float, range(math.ceil(low), math.floor(high) + 1)))
-    return tuple(sorted(levels))
-
-
 def tag_layer(tags):
     """The layer of an element with the OSM ``tags``: its ``layer`` tag as a float (0
     when missing or not a finite number), at most -1 for a tunnel without a positive

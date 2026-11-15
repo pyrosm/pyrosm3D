@@ -30,7 +30,7 @@ def to_html(indoor, path, title="Indoor elements", include_plotlyjs=True):
     Parameters
     ----------
     indoor : IndoorElements
-        The elements that :func:`pyrosm3d.read_indoor` returns.
+        The layers that :func:`pyrosm3d.indoor_layers` returns.
     path : str or pathlib.Path
         The HTML file to write.
     title : str

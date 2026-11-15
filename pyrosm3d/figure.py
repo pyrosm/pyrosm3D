@@ -67,7 +67,7 @@ def plot_indoor(indoor, level=None):
     Parameters
     ----------
     indoor : IndoorElements
-        The elements that :func:`pyrosm3d.read_indoor` returns. The figure shows the
+        The layers that :func:`pyrosm3d.indoor_layers` returns. The figure shows the
         areas and what lies within 10 m of them; a walking area, such as a square
         or a pedestrian street, is drawn as far as the other areas' view reaches.
     level : float (optional)
