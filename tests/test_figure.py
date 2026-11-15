@@ -4,9 +4,9 @@ import numpy as np
 import pytest
 from shapely.geometry import box
 
-from pyrosm3d.figure import layers_figure
-from pyrosm3d.floors import floor_levels, floor_openings
-from pyrosm3d.styles import AREA_STYLES, VIEW_MARGIN
+from pyrosm3d.figure import layers_figure, level_views
+from pyrosm3d.floors import floor_levels, floor_openings, floors_between_levels
+from pyrosm3d.styles import AREA_STYLES, VIEW_MARGIN, WALL_NAME
 from pyrosm3d.tags import crosses_area, element_keys
 
 
@@ -170,6 +170,41 @@ def test_plot_indoor_draws_one_level(maunula):
     assert (tuple(axis.range), axis.ticktext) == ((1.0, 6.0), ("1",))
     with pytest.raises(ValueError, match="nothing to draw on level 5"):
         layers_figure(maunula, level=5)
+
+
+def test_plot_indoor_draws_a_floor_between_two_levels(maunula):
+    """A room whose only level is between two floors has its floor, outline and walls
+    at its own height; a door there is a marker and an edge there is shown on that
+    level only. The level is labelled on the vertical axis, has a view of its own and
+    can be drawn alone."""
+    areas = maunula.areas.copy()
+    on_first = areas["levels"].map(lambda levels: levels == (1.0,))
+    room = areas.index[(areas["kind"] == "room") & on_first][0]
+    areas["levels"] = [
+        (0.5,) if row == room else levels
+        for row, levels in zip(areas.index, areas["levels"])
+    ]
+    door_on_first = maunula.doors["levels"].map(lambda levels: levels == (1.0,))
+    doors = maunula.doors[door_on_first].iloc[:1].assign(levels=[(0.5,)])
+    edges = maunula.edges.copy()
+    edge = edges.index[(edges["u_level"] == 1) & (edges["v_level"] == 1)][0]
+    edges.loc[edge, ["u_level", "v_level"]] = 0.5
+    changed = replace(maunula, areas=areas, doors=doors, edges=edges)
+    assert floors_between_levels(areas) == {0.5}
+    figure = layers_figure(changed)
+    on_half = [trace for trace in figure.data if trace.meta["levels"] == [0.5]]
+    names = {trace.name for trace in on_half}
+    drawn = {"Rooms", "Room and corridor outlines", WALL_NAME, "Doors and entrances"}
+    assert drawn < names and len(names) == len(drawn) + 1  # and the edge
+    (floor,) = [trace for trace in on_half if trace.name == "Rooms"]
+    assert set(floor.z) == {2.0}
+    assert all(0.5 not in trace.meta["levels"][:-1] for trace in figure.data)
+    assert "0.5" in figure.layout.scene.zaxis.ticktext
+    views = level_views(figure)
+    assert list(views) == [0.0, 0.5, 1.0, 2.0]
+    assert views[0.5]["scene.zaxis.ticktext"] == ["0.5"]
+    alone = layers_figure(changed, level=0.5)
+    assert {trace.name for trace in alone.data} == names
 
 
 def test_plot_indoor_opens_floors_for_stairs(maunula):

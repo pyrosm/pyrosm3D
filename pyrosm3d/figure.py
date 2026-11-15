@@ -19,7 +19,12 @@ import plotly.graph_objects as go
 import shapely
 
 from pyrosm3d.columns import shaft_columns
-from pyrosm3d.floors import floor_levels, floor_openings, triangles
+from pyrosm3d.floors import (
+    floor_levels,
+    floor_openings,
+    floors_between_levels,
+    triangles,
+)
 from pyrosm3d.indoor import indoor_layers
 from pyrosm3d.network import (
     _STYLES,
@@ -106,6 +111,8 @@ def layers_figure(indoor, level=None):
         edges=indoor.edges[indoor.edges.intersects(view)],
     )
     outer, level_floors = outer_walls(indoor, view)
+    between = floors_between_levels(indoor.areas)
+    platform_floors = _platform_floors(indoor.areas, view)
     traces = (
         _floor_traces(indoor.areas, floor_openings(indoor.edges), origin, view)
         + _outline_traces(indoor.areas, origin, view)
@@ -114,9 +121,9 @@ def layers_figure(indoor, level=None):
         + _wall_traces(outer, OUTER_WALL_NAME, origin, hidden=True)
         + _level_floor_traces(level_floors, origin)
         + _column_traces(indoor, origin)
-        + _network_traces(indoor.edges, origin, _platform_floors(indoor.areas, view))
-        + _marker_traces(indoor.doors, DOOR_STYLE, WALL_HEIGHT / 2, origin)
-        + _marker_traces(indoor.pois, POI_STYLE, _POI_LIFT, origin)
+        + _network_traces(indoor.edges, origin, platform_floors, between)
+        + _marker_traces(indoor.doors, DOOR_STYLE, WALL_HEIGHT / 2, origin, between)
+        + _marker_traces(indoor.pois, POI_STYLE, _POI_LIFT, origin, between)
     )
     if level is not None:
         traces = [trace for trace in traces if level in trace.meta["levels"]]
@@ -130,7 +137,7 @@ def layers_figure(indoor, level=None):
         trace.showlegend = trace.legendgroup not in in_legend
         in_legend.add(trace.legendgroup)
     levels = sorted({float(lv) for trace in traces for lv in trace.meta["levels"]})
-    return go.Figure(traces, _layout(box, levels))
+    return go.Figure(traces, _layout(box, levels, between))
 
 
 def _view_box(indoor):
@@ -386,13 +393,15 @@ def _platform_floors(areas, view):
     return {key for key, levels in zip(*columns) if floor_levels("platform", levels)}
 
 
-def _network_traces(edges, origin, platform_floors=()):
+def _network_traces(edges, origin, platform_floors=(), between=()):
     """The ``edges`` of the walking network as lines, one trace for each kind of edge
     (see :func:`pyrosm3d.plot_network`) and each set of levels an edge is shown on:
-    the levels at its two ends, and for a level between two floors the nearest
-    floor. The platform edges of the elements among ``platform_floors`` (keys, see
-    :func:`_platform_floors`) are left out: the outline of a platform mapped as a
-    closed way is an edge, and its floor is drawn with an outline already."""
+    the levels at its two ends, and for a level between two floors also the nearest
+    whole level, unless an area has its floor there (the levels ``between``, see
+    :func:`pyrosm3d.floors.floors_between_levels`). The platform edges of the
+    elements among ``platform_floors`` (keys, see :func:`_platform_floors`) are left
+    out: the outline of a platform mapped as a closed way is an edge, and its floor
+    is drawn with an outline already."""
     lines = {kind: _LevelLines() for kind in _STYLES}
     kinds = zip(element_keys(edges), _edge_kinds(edges))
     for key, (row, tags, kind, level_u, level_v) in kinds:
@@ -401,7 +410,8 @@ def _network_traces(edges, origin, platform_floors=()):
         z_u, z_v = (lv * FLOOR_HEIGHT + _NETWORK_LIFT for lv in (level_u, level_v))
         points = _line_points(row.geometry, z_u, z_v, origin, vertical=kind == "lift")
         ends = {float(level_u), float(level_v)}
-        shown = sorted(ends | {float(math.floor(end + 0.5)) for end in ends})
+        beside = {float(math.floor(end + 0.5)) for end in ends - set(between)}
+        shown = sorted(ends | beside)
         text = _edge_text(row, tags, kind, level_u, level_v)
         lines[kind].add(shown, *points, text, key)
     traces = []
@@ -410,9 +420,10 @@ def _network_traces(edges, origin, platform_floors=()):
     return traces
 
 
-def _marker_traces(points, style, lift, origin):
+def _marker_traces(points, style, lift, origin, between=()):
     """The ``points`` of a doors or pois layer as markers ``lift`` metres above their
-    floor, one trace for each whole level, hidden until picked in the legend;
+    floor, one trace for each whole level and each of the levels ``between`` (see
+    :func:`pyrosm3d.floors.floors_between_levels`), hidden until picked in the legend;
     ``style`` is ``DOOR_STYLE`` or ``POI_STYLE``."""
     name, colour, symbol, fallback = style
     by_level = {}
@@ -420,7 +431,7 @@ def _marker_traces(points, style, lift, origin):
     for key, levels, tags, point in zip(element_keys(points), *columns):
         label = tags.get("name") or tags.get("shop") or tags.get("amenity") or fallback
         for level in levels:
-            if float(level).is_integer():
+            if float(level).is_integer() or level in between:
                 x, y, text, keys = by_level.setdefault(level, ([], [], [], []))
                 x.append(round(point.x - origin[0], 2))
                 y.append(round(point.y - origin[1], 2))
@@ -447,17 +458,21 @@ def _marker_traces(points, style, lift, origin):
 
 def level_views(figure):
     """``{level: scene}`` for each whole level of ``figure``, a figure of
-    :func:`plot_indoor` with all levels: the range and the ticks of the vertical axis
-    and the aspect ratio of the scene that ``plot_indoor(level=...)`` gives that
-    level, as plotly's ``relayout`` takes them."""
+    :func:`plot_indoor` with all levels, and each level between two floors that an
+    area has its floor on: the range and the ticks of the vertical axis and the aspect
+    ratio of the scene that ``plot_indoor(level=...)`` gives that level, as plotly's
+    ``relayout`` takes them."""
     scene = figure.layout.scene
     (west, east), (south, north) = scene.xaxis.range, scene.yaxis.range
     on_levels = [trace.meta["levels"] for trace in figure.data]
     whole = {lv for levels in on_levels for lv in levels if float(lv).is_integer()}
+    floor_names = {name for name, _, _ in AREA_STYLES.values()}
+    floors = [trace for trace in figure.data if trace.legendgroup in floor_names]
+    between = {lv for trace in floors for lv in trace.meta["levels"]} - whole
     views = {}
-    for level in sorted(whole):
+    for level in sorted(whole | between):
         shown = sorted({lv for levels in on_levels if level in levels for lv in levels})
-        scene = _layout((west, south, east, north), shown)["scene"]
+        scene = _layout((west, south, east, north), shown, between)["scene"]
         views[level] = {
             "scene.zaxis.range": scene["zaxis"]["range"],
             "scene.zaxis.tickvals": scene["zaxis"]["tickvals"],
@@ -467,15 +482,16 @@ def level_views(figure):
     return views
 
 
-def _layout(box, levels):
+def _layout(box, levels, between=()):
     """The layout of a figure of the view ``box`` (metres) whose traces are on
     ``levels`` (sorted): axes in metres from the middle of the box, the vertical axis
-    from the lowest to the highest level and labelled with the whole levels, and the
-    heights stretched; a white scene without axis panes, seen from the south-east,
-    that turns about its vertical axis."""
+    from the lowest to the highest level and labelled with the whole levels and those
+    of the levels ``between`` (see :func:`pyrosm3d.floors.floors_between_levels`),
+    and the heights stretched; a white scene without axis panes, seen from the
+    south-east, that turns about its vertical axis."""
     width, height = box[2] - box[0], box[3] - box[1]
     longest = max(width, height)
-    whole = [shown for shown in levels if shown.is_integer()]
+    labelled = [lv for lv in levels if lv.is_integer() or lv in between]
     z_range = [levels[0] * FLOOR_HEIGHT - 1, levels[-1] * FLOOR_HEIGHT + 2]
     z_aspect = (z_range[1] - z_range[0]) * _HEIGHT_STRETCH / longest
     z_aspect = min(1.1, max(0.12, z_aspect))
@@ -490,8 +506,8 @@ def _layout(box, levels):
             zaxis=dict(
                 title_text="level",
                 range=z_range,
-                tickvals=[shown * FLOOR_HEIGHT for shown in whole],
-                ticktext=["%g" % shown for shown in whole],
+                tickvals=[shown * FLOOR_HEIGHT for shown in labelled],
+                ticktext=["%g" % shown for shown in labelled],
                 **AXIS_STYLE,
             ),
             aspectmode="manual",

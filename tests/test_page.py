@@ -49,7 +49,8 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     in the tags panel, over what the element is and its level. A legend entry cannot
     be shown alone with a double click. A
     button for all levels and one for each level, named by its number over the number
-    of areas on it (0 on a level that has only a wall), show the traces of that level,
+    of areas on it (0 on a level that has only a wall; a level between two floors that
+    a room has its floor on has a button too), show the traces of that level,
     drawn
     or switched off as in the figure, list each legend entry once and set the vertical
     axis as plot_indoor does for the level. A click on a legend entry switches it off
@@ -90,14 +91,22 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     assert shown["names"] == ["All levels"] + names
     assert shown["counts"] == [[]] + [["small %d" % count] for count in counts]
     wall_above = maunula.walls.assign(levels=[(7.0,)])
+    rooms = maunula.areas["kind"] == "room"
+    between = maunula.areas.assign(
+        levels=[
+            (0.5,) if row == maunula.areas.index[rooms][0] else levels
+            for row, levels in zip(maunula.areas.index, maunula.areas["levels"])
+        ]
+    )
     path_above = layers_page(
-        replace(maunula, walls=wall_above),
+        replace(maunula, walls=wall_above, areas=between),
         tmp_path / "above.html",
         include_plotlyjs=False,
     )
     above = _run_page(path_above, "Rooms", "Rooms")
     assert (above["buttons"][-1], above["names"][-1]) == ("7", "Level 7, 0 areas")
     assert above["counts"][-1] == ["small 0"]
+    assert (above["buttons"][2], above["names"][2]) == ("0.5", "Level 0.5, 1 area")
     views = level_views(figure)
     for button, level in zip(shown["buttons"], [None, 0.0, 1.0, 2.0]):
         view = shown["views"][button]
