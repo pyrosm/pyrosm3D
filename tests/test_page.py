@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import replace
@@ -155,6 +156,22 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     assert touches["distances"] == pytest.approx([4, 2, 2, 2, 4, 4, 4])
     assert touches["pans"] == [[0, pytest.approx(0.2), 0], [0, 0, 0]]
     assert touches["saves"] == [1, 1, 1, 2]
+
+
+def test_level_counts_leave_out_areas_outside_the_view(maunula, tmp_path):
+    """The count on a level's button holds the areas that the figure draws: a walking
+    area that lies outside the view of the other areas is not counted."""
+    areas = maunula.areas
+    is_square = areas["id"] == 674689752
+    far = areas.assign(geometry=areas.geometry.where(~is_square, areas.translate(5000)))
+    counts = {}
+    for name, layers in (("near", maunula), ("far", replace(maunula, areas=far))):
+        path = layers_page(layers, tmp_path / (name + ".html"), include_plotlyjs="cdn")
+        page = path.read_text(encoding="utf-8")
+        data = json.loads(re.search(r'id="page-data">(.*?)</script>', page, re.S)[1])
+        counts[name] = dict(zip(data["levels"], data["counts"]))
+    assert counts["near"][0.0] == 7  # four platforms, the two squares and the lift
+    assert counts["far"] == {**counts["near"], 0.0: 6}
 
 
 def test_element_notes_of_maunula_talo(maunula):

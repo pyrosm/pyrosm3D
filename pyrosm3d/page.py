@@ -10,7 +10,7 @@ from string import Template
 
 import plotly.io
 
-from pyrosm3d.figure import layers_figure, level_views
+from pyrosm3d.figure import areas_in_view, layers_figure, level_views
 from pyrosm3d.indoor import indoor_layers
 from pyrosm3d.network import EDGE_NAMES, _edge_kinds, end_levels_text
 from pyrosm3d.styles import AREA_STYLES, DOOR_STYLE, POI_STYLE
@@ -75,7 +75,8 @@ def layers_page(indoor, path, title="Indoor elements", include_plotlyjs=True):
     scene = figure.layout.scene
     elements = _drawn_elements(indoor, figure)
     notes = _element_notes(indoor)
-    floors = indoor.areas[indoor.areas["kind"].isin(list(AREA_STYLES))]
+    floors = areas_in_view(indoor)
+    floors = floors[floors["kind"].isin(list(AREA_STYLES))]
     data = {
         "levels": [float(level) for level in views],
         "counts": [sum(level in on for on in floors["levels"]) for level in views],
