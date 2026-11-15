@@ -15,7 +15,13 @@ import plotly.graph_objects as go
 import shapely
 from geopandas import GeoDataFrame
 
-from pyrosm3d.tags import float_column, level_ranges, row_tags, tag_layer
+from pyrosm3d.tags import (
+    float_column,
+    is_platform,
+    layer_level,
+    level_ranges,
+    row_tags,
+)
 
 # (name in the legend, colour, line width, dash) of each kind of edge
 _STYLES = {
@@ -33,7 +39,6 @@ _STYLES = {
 # The route: red, wide and solid, drawn over the edges; the escalators are amber so that
 # they stay apart from it
 _ROUTE_COLOUR = "#e8002d"
-_PLATFORM_TAGS = ("railway", "public_transport", "highway")
 _ENTRANCES = ("subway_entrance", "train_station_entrance")
 
 
@@ -93,7 +98,7 @@ def _edge_kind(tags, vertical, u_level, v_level, crossing):
         kind = vertical
     elif crossing:
         kind = "crossing"
-    elif any(tags.get(key) == "platform" for key in _PLATFORM_TAGS):
+    elif is_platform(tags):
         kind = "platform"
     else:
         kind = None
@@ -102,7 +107,7 @@ def _edge_kind(tags, vertical, u_level, v_level, crossing):
         if ranges and (len(ranges) > 1 or ranges[0][0] != ranges[0][1]):
             low = min(r[0] for r in ranges)
             return kind or "multi", low, low
-        z = ranges[0][0] if ranges else min(tag_layer(tags), 0.0)
+        z = ranges[0][0] if ranges else layer_level(tags)
         return kind or ("street" if z == 0 else "levels"), z, z
     u_level = v_level if np.isnan(u_level) else u_level
     v_level = u_level if np.isnan(v_level) else v_level

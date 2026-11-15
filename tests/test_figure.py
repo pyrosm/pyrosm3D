@@ -26,8 +26,9 @@ def _levels(traces, name):
 
 def test_plot_indoor_draws_maunula_talo(maunula):
     """The floors of each kind of area are plates 4 m apart that cover the areas (the
-    lift shaft on each of its three levels; no floor for level outlines or a wall
-    mapped as an area), with outlines and the network on their levels; each legend
+    lift shaft on each of its three levels, the platform areas on street level; no
+    floor for level outlines or a wall mapped as an area), with outlines and the
+    network on their levels; each legend
     entry is listed once; doors and shops are markers on their levels, hidden at
     start; the vertical axis names the levels."""
     figure = plot_indoor(maunula)
@@ -46,6 +47,7 @@ def test_plot_indoor_draws_maunula_talo(maunula):
             assert set(floor.z) == {floor.meta["levels"][0] * 4.0}
     assert set(_levels(traces, "Rooms")) == {1.0, 2.0}
     assert set(_levels(traces, "Stairwells, lifts, storage")) == {0.0, 1.0, 2.0}
+    assert set(_levels(traces, "Platform areas")) == {0.0}
     assert set(_levels(traces, "Room and corridor outlines")) == {0.0, 1.0, 2.0}
     assert set(_levels(traces, "Lines across areas")) == {0.0, 1.0, 2.0}
     assert set(_levels(traces, "Platforms")) == {0.0}

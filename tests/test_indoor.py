@@ -1,11 +1,12 @@
 from collections import Counter
 
+import numpy as np
 import pytest
 from geopandas import GeoDataFrame
-from shapely.geometry import LineString
+from shapely.geometry import LineString, box
 
 from pyrosm3d import IndoorElements, read_indoor
-from pyrosm3d.indoor import area_kind
+from pyrosm3d.indoor import _with_platform_levels, area_kind
 
 _LAYER_COLUMNS = ["id", "osm_type", "kind", "levels", "tags", "geometry"]
 
@@ -13,20 +14,25 @@ _LAYER_COLUMNS = ["id", "osm_type", "kind", "levels", "tags", "geometry"]
 def test_read_indoor_reads_maunula_talo(maunula):
     """The layers of a building with three mapped floors, in the metres of its UTM
     zone: the areas with their kinds and levels (a lift through three floors is a
-    shaft on all of them, a wall mapped as an area is a wall), the wall mapped as a
-    line, the doors, the shops and amenities that have a level as points, the
-    building outlines and the walking network with its stairs."""
+    shaft on all of them, a wall mapped as an area is a wall, the bus and tram
+    platforms beside the building, which have no indoor and no level tag, are
+    platforms on street level), the wall mapped as a line, the doors, the shops and
+    amenities that have a level as points, the building outlines and the walking
+    network with its stairs."""
     assert isinstance(maunula, IndoorElements)
     layers = (maunula.areas, maunula.walls, maunula.doors, maunula.pois)
     frames = layers + (maunula.buildings, maunula.nodes, maunula.edges)
-    assert [len(frame) for frame in frames] == [60, 1, 158, 9, 37, 890, 1064]
+    assert [len(frame) for frame in frames] == [64, 1, 158, 9, 37, 890, 1064]
     assert {frame.crs.to_epsg() for frame in frames} == {32635}
 
     areas = maunula.areas
     assert list(areas.columns) == _LAYER_COLUMNS
     assert set(areas.geometry.geom_type) == {"Polygon"}
-    kinds = {"room": 42, "corridor": 8, "level": 5, "shaft": 3, "toilets": 1, "wall": 1}
-    assert Counter(areas["kind"]) == kinds
+    kinds = {"room": 42, "corridor": 8, "level": 5, "platform": 4, "shaft": 3}
+    assert Counter(areas["kind"]) == {**kinds, "toilets": 1, "wall": 1}
+    platforms = areas[areas["kind"] == "platform"]
+    assert set(platforms["levels"]) == {(0.0,)}
+    assert not any("indoor" in tags or "level" in tags for tags in platforms["tags"])
     lift = areas[areas["id"] == 1568797319].iloc[0]
     assert (lift["kind"], lift["levels"]) == ("shaft", (0.0, 1.0, 2.0))
     assert lift["tags"]["level"] == "0-2" and lift["tags"]["room"] == "elevator"
@@ -102,6 +108,7 @@ def test_read_indoor_needs_a_pyrosm_with_indoor_reads():
         ({"indoor": "level"}, "level"),
         ({"indoor": "area", "public_transport": "platform"}, "platform"),
         ({"indoor": "room", "railway": "platform"}, "platform"),
+        ({"highway": "platform", "area": "yes"}, "platform"),
         ({"indoor": "area"}, "corridor"),
         ({"indoor": "room", "room": "corridor"}, "corridor"),
         ({"indoor": "room", "room": "technical"}, "shaft"),
@@ -120,3 +127,36 @@ def test_area_kind(tags, kind):
     platform, a corridor, a shaft, toilets, a shop or place to eat, else a room, or
     ``indoor`` for an area tagged only indoor=yes or indoor=no."""
     assert area_kind(tags) == kind
+
+
+def test_platform_areas_without_a_level_get_one():
+    """A platform area without a level is on the lowest level that pyrosm gave its
+    lines in the network (the lines of another element with its id do not count),
+    without one on its layer below street level, else on street level, also when its
+    ``level`` tag gives no level; the levels of its own ``level`` tag stay, and so
+    does the missing level of another kind of area."""
+    cases = [
+        (1, "way", "platform", (), {}, (-2.0,)),
+        (2, "relation", "platform", (), {"layer": "-1"}, (-1.0,)),
+        (3, "way", "platform", (), {"layer": "1"}, (0.0,)),
+        (6, "way", "platform", (), {"level": "ground"}, (0.0,)),
+        (4, "way", "platform", (1.0,), {"level": "1"}, (1.0,)),
+        (5, "way", "room", (), {}, ()),
+    ]
+    ids, types, kinds, levels, tags, expected = zip(*cases)
+    areas = GeoDataFrame(
+        {"id": ids, "osm_type": types, "kind": kinds, "levels": levels, "tags": tags},
+        geometry=[box(0, 0, 1, 1)] * len(cases),
+        crs=32635,
+    )
+    edges = GeoDataFrame(
+        {
+            "id": [1, 1, 2, 4, 5],
+            "osm_type": ["way"] * 5,
+            "u_level": [np.nan, -2.0, -3.0, 0.0, 2.0],
+            "v_level": [np.nan, -1.0, -3.0, 0.0, 2.0],
+        },
+        geometry=[LineString([(0, 0), (1, 1)])] * 5,
+        crs=32635,
+    )
+    assert tuple(_with_platform_levels(areas, edges)["levels"]) == expected

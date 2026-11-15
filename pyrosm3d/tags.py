@@ -1,5 +1,5 @@
-"""The OSM tags of the rows of a frame read with pyrosm, and the levels and the layer
-that tags give an element."""
+"""The OSM tags and the keys of the rows of a frame read with pyrosm, and what tags say
+of an element: its levels, its layer and whether it is a platform."""
 
 import json
 import math
@@ -38,6 +38,16 @@ _LEVEL_PART = re.compile(r"\s*(-?\d+(?:\.\d+)?)(?:\s*-\s*(-?\d+(?:\.\d+)?))?\s*"
 # The most levels that a range of a level value may span; the tallest buildings have
 # fewer than 200 floors.
 _MAX_LEVEL_SPAN = 200
+# The keys whose value ``platform`` makes an element a platform.
+_PLATFORM_KEYS = ("railway", "public_transport", "highway")
+
+
+def element_keys(frame):
+    """A key such as ``"way 123"`` for each row of ``frame``: its ``osm_type`` (way
+    without the column) and ``id``. The traces of :func:`pyrosm3d.plot_indoor` carry
+    the key of the element at each of their points as ``customdata``."""
+    types = frame["osm_type"] if "osm_type" in frame.columns else ["way"] * len(frame)
+    return ["%s %s" % element for element in zip(types, frame["id"])]
 
 
 def row_tags(frame):
@@ -224,3 +234,16 @@ def tag_layer(tags):
     if tags.get("tunnel") == "yes" and layer <= 0:
         layer = min(layer, -1.0)
     return layer
+
+
+def layer_level(tags):
+    """The level given to an element with the OSM ``tags`` that has no level: its
+    layer (see :func:`tag_layer`) when that is below street level, else street level
+    (0)."""
+    return min(tag_layer(tags), 0.0)
+
+
+def is_platform(tags):
+    """Whether an element with the OSM ``tags`` is a platform: its ``railway``,
+    ``public_transport`` or ``highway`` tag is ``platform``."""
+    return any(tags.get(key) == "platform" for key in _PLATFORM_KEYS)
