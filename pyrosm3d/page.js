@@ -63,10 +63,19 @@
     });
   }
 
-  function addButton(label, value, buttonView) {
+  // A button that shows one level (null: all levels): a short label over the number
+  // of areas on the level, and the full name for a pointer and a screen reader
+  function addButton(label, name, value, buttonView, count) {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = label;
+    button.title = name;
+    button.setAttribute("aria-label", name);
+    if (count) {
+      const areas = document.createElement("small");
+      areas.textContent = String(count);
+      button.appendChild(areas);
+    }
     button.dataset.level = String(value);
     button.addEventListener("click", () => show(value, buttonView));
     nav.appendChild(button);
@@ -167,8 +176,12 @@
     saveCamera();
   }
 
-  addButton("All levels", null, page.all);
-  page.levels.forEach((value, n) => addButton("Level " + value, value, page.views[n]));
+  addButton("All levels", "All levels", null, page.all, 0);
+  page.levels.forEach((value, n) => {
+    const count = page.counts[n];
+    const areas = count === 1 ? "1 area" : count + " areas";
+    addButton(String(value), "Level " + value + ", " + areas, value, page.views[n], count);
+  });
   show(null, page.all);
   // On a small page the legend would take the room of the view: hidden at start
   showLegend(legend);

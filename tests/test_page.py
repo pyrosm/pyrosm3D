@@ -10,6 +10,7 @@ import pytest
 from pyrosm3d import plot_indoor, to_html
 from pyrosm3d.figure import level_views
 from pyrosm3d.page import _element_notes
+from pyrosm3d.styles import AREA_STYLES
 
 
 def _run_page(path, entry, clicked, size="wide"):
@@ -46,7 +47,8 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     end a script block stays text: it adds no script to the page and shows as it is
     in the tags panel, over what the element is and its level. A legend entry cannot
     be shown alone with a double click. A
-    button for all levels and one for each level show the traces of that level, drawn
+    button for all levels and one for each level, named by its number over the number
+    of areas on it, show the traces of that level, drawn
     or switched off as in the figure, list each legend entry once and set the vertical
     axis as plot_indoor does for the level. A click on a legend entry switches it off
     on every level, and a click on a room shows its tags with a link to the element;
@@ -78,7 +80,13 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
 
     figure = plot_indoor(maunula)
     shown = _run_page(path, "Rooms", "Rooms")
-    assert shown["buttons"] == ["All levels", "Level 0", "Level 1", "Level 2"]
+    assert shown["buttons"] == ["All levels", "0", "1", "2"]
+    floors = maunula.areas[maunula.areas["kind"].isin(list(AREA_STYLES))]
+    counts = [sum(level in on for on in floors["levels"]) for level in (0.0, 1.0, 2.0)]
+    assert counts[0] == 6  # four platforms, the square and the lift
+    names = ["Level %d, %d areas" % (level, count) for level, count in enumerate(counts)]
+    assert shown["names"] == ["All levels"] + names
+    assert shown["counts"] == [[]] + [["small %d" % count] for count in counts]
     views = level_views(figure)
     for button, level in zip(shown["buttons"], [None, 0.0, 1.0, 2.0]):
         view = shown["views"][button]

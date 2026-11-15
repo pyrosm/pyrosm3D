@@ -20,10 +20,12 @@ def to_html(indoor, path, title="Indoor elements", include_plotlyjs=True):
     """Write a web page with the 3D view of indoor elements.
 
     The page shows the figure of :func:`pyrosm3d.plot_indoor`. Its buttons show all
-    levels or one level and show or hide the legend, and a click on an area, a line of
-    the network or a marker shows the element's OpenStreetMap tags beside the figure.
-    On a small screen, such as a phone's, the legend is hidden at start and the tags
-    lie over the figure. On a touch screen two fingers zoom and move the view.
+    levels or one level (each level's button has the number of areas on it) and show
+    or hide the legend, and a click on an area, a line of the network, a marker or a
+    stairwell or lift column shows what the element is and its OpenStreetMap tags
+    beside the figure. On a small screen, such as a phone's, the level buttons are
+    one row that scrolls sideways, the legend is hidden at start and the tags lie
+    over the figure. On a touch screen two fingers zoom and move the view.
 
     Parameters
     ----------
@@ -51,8 +53,10 @@ def to_html(indoor, path, title="Indoor elements", include_plotlyjs=True):
     scene = figure.layout.scene
     elements = _drawn_elements(indoor, figure)
     notes = _element_notes(indoor)
+    floors = indoor.areas[indoor.areas["kind"].isin(list(AREA_STYLES))]
     data = {
         "levels": [float(level) for level in views],
+        "counts": [sum(level in on for on in floors["levels"]) for level in views],
         "views": list(views.values()),
         "all": {
             "scene.zaxis.range": list(scene.zaxis.range),

@@ -155,11 +155,13 @@ function touches() {
 }
 
 setImmediate(() => {
-  const out = { buttons: [], views: {}, legendAtStart: legend() };
+  const out = { buttons: [], names: [], counts: [], views: {}, legendAtStart: legend() };
   elements.legend.listeners.click();
   out.legendAfterClick = legend();
   elements.levels.children.forEach((button) => {
     out.buttons.push(button.textContent);
+    out.names.push(button.attributes["aria-label"]);
+    out.counts.push(button.children.map((child) => child.tag + " " + child.textContent));
     button.listeners.click();
     const pressed = elements.levels.children.filter((b) => b.attributes["aria-pressed"] === "true");
     out.views[button.textContent] = Object.assign(shown(), { pressed: pressed.map((b) => b.textContent) });
