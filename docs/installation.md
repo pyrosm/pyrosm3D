@@ -18,4 +18,4 @@ pip install "pyrosm @ git+https://github.com/pyrosm/pyrosm@main"
 
 The command builds pyrosm from source, which needs a C compiler.
 
-The drawing functions do not import pyrosm. `plot_network` takes GeoDataFrames or a graph, and `plot_indoor` and `to_html` take an `IndoorElements` object, which `indoor_layers` makes of frames read with pyrosm.
+The drawing functions do not import pyrosm. `plot_indoor` and `to_html` take the GeoDataFrames that pyrosm reads, and `plot_network` takes GeoDataFrames or a graph.

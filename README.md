@@ -33,7 +33,7 @@ osm.in3d.plot_network().show()             # the walking network alone, each edg
 
 pyrosm does the reading, and pyrosm3d the drawing. Each view of `osm.in3d` reads what it draws with the `OSM` object's own reads: the indoor elements with the walking areas (`get_indoor_elements(walking_areas=True)`), the walking network with `indoor_elements=True`, and the buildings. `plot_indoor` draws floors with openings for stairs and escalators, walls with a gap at each door, stairwells and lift shafts as columns, and the network. What it can draw depends on what is mapped: the levels come from the `level` tags of [Simple Indoor Tagging](https://wiki.openstreetmap.org/wiki/Simple_Indoor_Tagging).
 
-Frames that you have read or changed yourself are drawn with the functions of the package: `pyrosm3d.plot_network(edges, nodes)`, and `pyrosm3d.plot_indoor` and `pyrosm3d.to_html` with the layers that `pyrosm3d.indoor_layers` makes of pyrosm's frames.
+Frames that you have read or changed yourself are drawn with the functions of the package, which take pyrosm's frames: `pyrosm3d.plot_indoor(elements, edges, nodes, buildings)`, `pyrosm3d.to_html(elements, path, edges, nodes, buildings)` and `pyrosm3d.plot_network(edges, nodes)`.
 
 ## Documentation
 

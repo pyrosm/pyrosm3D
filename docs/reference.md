@@ -14,13 +14,9 @@
 The functions draw frames that were read with pyrosm, also after you have changed them.
 
 ```{eval-rst}
-.. autofunction:: pyrosm3d.indoor_layers
-
-.. autoclass:: pyrosm3d.IndoorElements
-
 .. autofunction:: pyrosm3d.plot_indoor
 
-.. autofunction:: pyrosm3d.plot_network
-
 .. autofunction:: pyrosm3d.to_html
+
+.. autofunction:: pyrosm3d.plot_network
 ```
