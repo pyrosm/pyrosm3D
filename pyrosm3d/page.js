@@ -63,10 +63,20 @@
     });
   }
 
-  function addButton(label, value, buttonView) {
+  // A button that shows one level (null: all levels): a short label, over the number
+  // of areas on the level where a count is given, and the full name for a pointer and
+  // a screen reader
+  function addButton(label, name, value, buttonView, count) {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = label;
+    button.title = name;
+    button.setAttribute("aria-label", name);
+    if (count !== null) {
+      const areas = document.createElement("small");
+      areas.textContent = String(count);
+      button.appendChild(areas);
+    }
     button.dataset.level = String(value);
     button.addEventListener("click", () => show(value, buttonView));
     nav.appendChild(button);
@@ -90,6 +100,8 @@
     close.addEventListener("click", () => panel.replaceChildren(...hint));
     const heading = document.createElement("h2");
     heading.textContent = tags.name || tags.ref || key;
+    const note = document.createElement("p");
+    note.textContent = page.about[key] || "";
     const link = document.createElement("a");
     link.href = "https://www.openstreetmap.org/" + type + "/" + id;
     link.textContent = key;
@@ -104,16 +116,16 @@
       row.appendChild(cell);
       table.appendChild(row);
     });
-    panel.replaceChildren(close, heading, link, table);
+    panel.replaceChildren(close, heading, note, link, table);
   }
 
-  // Which two touches these are, how far apart (a pixel at least), and the point
-  // between them
+  // Which two touches these are (the same in either order: a list of touches has no
+  // fixed order), how far apart (a pixel at least), and the point between them
   function fingers(touches) {
     const [first, second] = [touches[0], touches[1]];
     const apart = Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY);
     return {
-      pair: first.identifier + " " + second.identifier,
+      pair: [first.identifier, second.identifier].sort((a, b) => a - b).join(" "),
       apart: Math.max(apart, 1),
       x: (first.clientX + second.clientX) / 2,
       y: (first.clientY + second.clientY) / 2,
@@ -165,8 +177,12 @@
     saveCamera();
   }
 
-  addButton("All levels", null, page.all);
-  page.levels.forEach((value, n) => addButton("Level " + value, value, page.views[n]));
+  addButton("All levels", "All levels", null, page.all, null);
+  page.levels.forEach((value, n) => {
+    const count = page.counts[n];
+    const areas = count === 1 ? "1 area" : count + " areas";
+    addButton(String(value), "Level " + value + ", " + areas, value, page.views[n], count);
+  });
   show(null, page.all);
   // On a small page the legend would take the room of the view: hidden at start
   showLegend(legend);

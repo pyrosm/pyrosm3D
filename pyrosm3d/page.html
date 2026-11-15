@@ -17,6 +17,9 @@
     padding-block: 8px; background: var(--surface); border-bottom: 1px solid var(--line); }
   h1 { font-size: 16px; margin: 0; }
   nav { display: flex; flex-wrap: wrap; gap: 4px; }
+  nav button { flex: none; min-width: 38px; padding: 3px 8px; line-height: 1.15; }
+  nav small { display: block; font-size: 10px; color: var(--muted); }
+  nav button[aria-pressed="true"] small { color: inherit; }
   button { font: inherit; padding: 4px 10px; border: 1px solid var(--line);
     border-radius: 4px; background: var(--surface); color: inherit; cursor: pointer; }
   button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink);
@@ -38,9 +41,11 @@
     border-top: 1px solid var(--line-soft); overflow-wrap: anywhere; }
   #tags th { font-weight: 600; white-space: nowrap; }
   footer { padding-block: 4px; font-size: 12px; color: var(--muted); }
-  /* A small page, such as a phone's: the panel lies over the view, along its lower
-     edge when the page is narrow and in its right corner when the page is low */
+  /* A small page, such as a phone's: the level buttons are one row under the title
+     that scrolls sideways, and the panel lies over the view, along its lower edge
+     when the page is narrow and in its right corner when the page is low */
   @media (max-width: 700px), (max-height: 500px) {
+    nav { order: 1; flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto; }
     #tags { position: absolute; z-index: 1; right: 0; bottom: 0; left: 0; width: auto;
       max-height: 45%; padding-left: max(16px, env(safe-area-inset-left, 0px));
       border-left: 0; border-top: 1px solid var(--line); }
@@ -59,7 +64,7 @@
 </header>
 <script type="application/json" id="page-data">$data</script>
 <main>
-  <aside id="tags"><p>Click an area, a line or a marker to see its OpenStreetMap tags.</p></aside>
+  <aside id="tags"><p>Click an area, a line, a marker or a column to see what it is and its OpenStreetMap tags.</p></aside>
   $plot
 </main>
 <footer>Map data © OpenStreetMap contributors</footer>

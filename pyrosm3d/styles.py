@@ -26,6 +26,7 @@ AREA_STYLES = {
     "indoor": ("Other indoor areas", "#e7eaee", "indoor area"),
     "shaft": ("Stairwells, lifts, storage", "#c9cbce", "stairwell, lift or storage"),
     "platform": ("Platform areas", "#bfe6d3", "platform area"),
+    "walking_area": ("Walking areas", "#dad6ea", "walking area"),
 }
 OUTLINE_COLOUR = "#8a8f98"
 LEVEL_OUTLINE_COLOUR = "#b9a99c"
@@ -51,6 +52,21 @@ COLUMN_STYLES = {
 }
 # The floor of a level or building outline, drawn under its outer walls
 LEVEL_FLOOR_COLOUR = "#ebe9e4"
+# Where the view starts: seen from the south-east and above, so that north lies away
+# from the viewer, with the middle of the scene a little below the middle of the view
+CAMERA = dict(eye=dict(x=1.25, y=-1.35, z=0.95), center=dict(x=0, y=0, z=-0.08))
+# The axes of the scene: no panes behind the drawing, and quiet lines and text
+AXIS_STYLE = dict(
+    showbackground=False,
+    gridcolor="#d6dbe1",
+    zerolinecolor="#d6dbe1",
+    color="#5c6672",
+    title_font_size=11,
+    tickfont_size=10,
+)
+BACKGROUND_COLOUR = "#ffffff"
+# The label of the element under the pointer
+HOVER_LABEL = dict(bgcolor="#ffffff", bordercolor="#d6dbe1", font_color="#1c2229")
 # (name in the legend, colour, marker symbol, name in the hover text) of the markers
 DOOR_STYLE = ("Doors and entrances", "#31363b", "square", "door or entrance")
 POI_STYLE = ("Shops and amenities", "#a07a00", "circle", "shop or amenity")

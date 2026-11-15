@@ -2,12 +2,13 @@
 
 The floors of the areas are plates at the height of their level, 4 m for each level,
 open where stairs, an escalator or a moving walkway rises through them, with the
-outlines of the areas and of the levels, the walking network, and the doors and shops
-as markers. The walls of rooms, and walls mapped as lines or areas, are see-through
-panels cut away at 40 % of a storey, with a gap at each door; outer walls stand a full
-storey high along the outlines of levels, or of buildings without them. Stairwells and
-lift shafts are columns through the floors that they join. Every trace is shown on the
-levels in its ``meta["levels"]``; a column has none and is drawn only with all levels.
+outlines of the areas, of the levels and of the buildings that have no level outline,
+the walking network, and the doors and shops as markers. The walls of rooms, and walls
+mapped as lines or areas, are see-through panels cut away at 40 % of a storey, with a
+gap at each door; outer walls stand a full storey high along the outlines of levels,
+or of buildings without them. Stairwells and lift shafts are columns through the
+floors that they join. Every trace is shown on the levels in its ``meta["levels"]``;
+a column has none and is drawn only with all levels.
 """
 
 import math
@@ -29,9 +30,13 @@ from pyrosm3d.network import (
 )
 from pyrosm3d.styles import (
     AREA_STYLES,
+    AXIS_STYLE,
+    BACKGROUND_COLOUR,
+    CAMERA,
     COLUMN_STYLES,
     DOOR_STYLE,
     FLOOR_HEIGHT,
+    HOVER_LABEL,
     LEVEL_FLOOR_COLOUR,
     LEVEL_OUTLINE_COLOUR,
     OUTER_WALL_NAME,
@@ -43,7 +48,7 @@ from pyrosm3d.styles import (
     WALL_STYLE,
 )
 from pyrosm3d.tags import element_keys
-from pyrosm3d.walls import inner_walls, outer_walls, wall_panels
+from pyrosm3d.walls import building_outlines, inner_walls, outer_walls, wall_panels
 
 # Metres that outlines and network lines are drawn above their floor, to stay visible
 _OUTLINE_LIFT = 0.05
@@ -63,7 +68,8 @@ def plot_indoor(indoor, level=None):
     ----------
     indoor : IndoorElements
         The elements that :func:`pyrosm3d.read_indoor` returns. The figure shows the
-        areas and what lies within 10 m of them.
+        areas and what lies within 10 m of them; a walking area, such as a square
+        or a pedestrian street, is drawn as far as the other areas' view reaches.
     level : float (optional)
         Draw only what is on this level, without the columns of stairwells and lift
         shafts; by default all levels.
@@ -86,13 +92,14 @@ def plot_indoor(indoor, level=None):
     )
     outer, level_floors = outer_walls(indoor, view)
     traces = (
-        _floor_traces(indoor.areas, floor_openings(indoor.edges), origin)
-        + _outline_traces(indoor.areas, origin)
+        _floor_traces(indoor.areas, floor_openings(indoor.edges), origin, view)
+        + _outline_traces(indoor.areas, origin, view)
+        + _building_outline_traces(building_outlines(indoor, view), origin)
         + _wall_traces(inner_walls(indoor), WALL_NAME, origin)
         + _wall_traces(outer, OUTER_WALL_NAME, origin, hidden=True)
         + _level_floor_traces(level_floors, origin)
         + _column_traces(indoor, origin)
-        + _network_traces(indoor.edges, origin)
+        + _network_traces(indoor.edges, origin, _platform_floors(indoor.areas, view))
         + _marker_traces(indoor.doors, DOOR_STYLE, WALL_HEIGHT / 2, origin)
         + _marker_traces(indoor.pois, POI_STYLE, _POI_LIFT, origin)
     )
@@ -112,10 +119,13 @@ def plot_indoor(indoor, level=None):
 
 
 def _view_box(indoor):
-    """``(west, south, east, north)`` of the view: the bounds of the areas, or of the
-    network where there are no areas, with a margin."""
-    frame = indoor.areas if len(indoor.areas) else indoor.edges
-    if frame.empty:
+    """``(west, south, east, north)`` of the view: the bounds of the areas other than
+    walking areas, of the walking areas where there are no others, or of the network
+    where there are no areas, with a margin."""
+    areas = indoor.areas
+    frames = (areas[areas["kind"] != "walking_area"], areas, indoor.edges)
+    frame = next((frame for frame in frames if len(frame)), None)
+    if frame is None:
         raise ValueError("plot_indoor got no areas and no network to draw.")
     west, south, east, north = frame.total_bounds
     return (
@@ -126,17 +136,28 @@ def _view_box(indoor):
     )
 
 
-def _floor_traces(areas, openings, origin):
-    """The floors of ``areas`` as meshes of triangles, one for each kind of area and
-    level, the kinds in the order of ``AREA_STYLES``; a floor is open where the
-    polygon of its level in ``openings`` crosses it."""
+def _inside(shape, view):
+    """The parts of ``shape``, a polygon or lines, inside the box ``view``: a list of
+    polygons or of lines, empty where ``shape`` lies outside the box."""
+    if view.contains(shape):
+        return list(shapely.get_parts(shape))
+    kind = "Polygon" if shape.geom_type.endswith("Polygon") else "LineString"
+    parts = shapely.get_parts(shape.intersection(view))
+    return [part for part in parts if part.geom_type == kind and not part.is_empty]
+
+
+def _floor_traces(areas, openings, origin, view):
+    """The floors of ``areas`` inside the box ``view`` as meshes of triangles, one for
+    each kind of area and level, the kinds in the order of ``AREA_STYLES``; a floor is
+    open where the polygon of its level in ``openings`` crosses it."""
     floors = {}
     columns = (areas["kind"], areas["levels"], areas["tags"], areas.geometry)
     for key, kind, levels, tags, polygon in zip(element_keys(areas), *columns):
         if kind not in AREA_STYLES:
             continue
         name = tags.get("name") or tags.get("ref") or AREA_STYLES[kind][2]
-        for level in floor_levels(kind, levels):
+        polygon = shapely.MultiPolygon(_inside(polygon, view))
+        for level in floor_levels(kind, levels) if not polygon.is_empty else ():
             floor = polygon
             if level in openings and polygon.intersects(openings[level]):
                 floor = polygon.difference(openings[level])
@@ -246,11 +267,12 @@ def _column_traces(indoor, origin):
     """The stairwells and the lift shafts of ``indoor`` as see-through columns, a
     trace for each of the two (see :func:`pyrosm3d.columns.shaft_columns`): walls
     along a column's outline from its lowest floor to wall height on its highest, and
-    a lid. A column passes through several levels, so its trace has no level."""
+    a lid, with the key of the column's largest room as ``customdata``. A column
+    passes through several levels, so its trace has no level."""
     traces = []
     for room, (name, colour, fallback) in COLUMN_STYLES.items():
-        corners, text, i, j, k = [], [], [], [], []
-        for outline, bottom, top, levels, names in shaft_columns(indoor, room):
+        corners, text, keys, i, j, k = [], [], [], [], [], []
+        for outline, bottom, top, levels, names, key in shaft_columns(indoor, room):
             z_low, z_high = bottom * FLOOR_HEIGHT, top * FLOOR_HEIGHT + WALL_HEIGHT
             ring = shapely.get_coordinates(outline.exterior)
             sides = wall_panels(ring, np.empty((0, 2)), z_low, z_high).reshape(-1, 3)
@@ -265,6 +287,7 @@ def _column_traces(indoor, origin):
             on_levels = ", ".join("%g" % level for level in levels)
             label = "%s<br>level %s" % (", ".join(names) or fallback, on_levels)
             text += [label] * (len(sides) + len(lid))
+            keys += [key] * (len(sides) + len(lid))
         if corners:
             xyz = np.concatenate(corners)
             traces.append(
@@ -283,15 +306,17 @@ def _column_traces(indoor, origin):
                     lighting=_FLAT_LIGHT,
                     hoverinfo="text",
                     hovertext=text,
+                    customdata=keys,
                     meta={"levels": []},
                 )
             )
     return traces
 
 
-def _outline_traces(areas, origin):
-    """The outlines of the ``areas`` as lines: of those that have a floor, on each
-    level of their floors, and of the level outlines, on each of their levels."""
+def _outline_traces(areas, origin, view):
+    """The outlines of the ``areas`` inside the box ``view`` as lines: of those that
+    have a floor, on each level of their floors, and of the level outlines, on each of
+    their levels."""
     rooms, levels = _LevelLines(), _LevelLines()
     for kind, on_levels, area in zip(areas["kind"], areas["levels"], areas.geometry):
         if kind == "level":
@@ -300,28 +325,56 @@ def _outline_traces(areas, origin):
             lines, lift, on_levels = rooms, _OUTLINE_LIFT, floor_levels(kind, on_levels)
         else:
             continue
+        outline = _inside(area.boundary, view)
         for level in on_levels:
             z = level * FLOOR_HEIGHT + lift
-            for ring in shapely.get_rings(shapely.get_parts(area)):
-                lines.add([level], *_line_points(ring, z, z, origin), "outline")
+            for line in outline:
+                lines.add([level], *_line_points(line, z, z, origin), "outline")
     traces = rooms.traces("Room and corridor outlines", OUTLINE_COLOUR, 1.5)
     traces += levels.traces("Level outlines", LEVEL_OUTLINE_COLOUR, 2.5)
     return [trace.update(hoverinfo="skip", hovertemplate=None) for trace in traces]
 
 
-def _network_traces(edges, origin):
+def _building_outline_traces(outlines, origin):
+    """The building outlines of each level (``{level: [xy arrays]}``, see
+    :func:`pyrosm3d.walls.building_outlines`) as lines."""
+    lines = _LevelLines()
+    for level, paths in outlines.items():
+        z = level * FLOOR_HEIGHT + _LEVEL_OUTLINE_LIFT
+        for path in paths:
+            heights = np.full(len(path), z)
+            xy = path - origin
+            lines.add([level], xy[:, 0], xy[:, 1], heights, "outline")
+    traces = lines.traces("Building outlines", LEVEL_OUTLINE_COLOUR, 2)
+    return [trace.update(hoverinfo="skip", hovertemplate=None) for trace in traces]
+
+
+def _platform_floors(areas, view):
+    """The keys of the platform areas among ``areas`` that have a floor in the box
+    ``view`` (see :func:`pyrosm3d.tags.element_keys`)."""
+    platforms = areas[(areas["kind"] == "platform") & areas.intersects(view)]
+    columns = (element_keys(platforms), platforms["levels"])
+    return {key for key, levels in zip(*columns) if floor_levels("platform", levels)}
+
+
+def _network_traces(edges, origin, platform_floors=()):
     """The ``edges`` of the walking network as lines, one trace for each kind of edge
     (see :func:`pyrosm3d.plot_network`) and each set of levels an edge is shown on:
     the levels at its two ends, and for a level between two floors the nearest
-    floor."""
+    floor. The platform edges of the elements among ``platform_floors`` (keys, see
+    :func:`_platform_floors`) are left out: the outline of a platform mapped as a
+    closed way is an edge, and its floor is drawn with an outline already."""
     lines = {kind: _LevelLines() for kind in _STYLES}
     kinds = zip(element_keys(edges), _edge_kinds(edges))
     for key, (row, tags, kind, level_u, level_v) in kinds:
+        if kind == "platform" and key in platform_floors:
+            continue
         z_u, z_v = (lv * FLOOR_HEIGHT + _NETWORK_LIFT for lv in (level_u, level_v))
         points = _line_points(row.geometry, z_u, z_v, origin, vertical=kind == "lift")
         ends = {float(level_u), float(level_v)}
         shown = sorted(ends | {float(math.floor(end + 0.5)) for end in ends})
-        lines[kind].add(shown, *points, _edge_text(row, tags, kind), key)
+        text = _edge_text(row, tags, kind, level_u, level_v)
+        lines[kind].add(shown, *points, text, key)
     traces = []
     for kind, (name, colour, width, dash) in _STYLES.items():
         traces += lines[kind].traces(name, colour, width, dash)
@@ -389,7 +442,8 @@ def _layout(box, levels):
     """The layout of a figure of the view ``box`` (metres) whose traces are on
     ``levels`` (sorted): axes in metres from the middle of the box, the vertical axis
     from the lowest to the highest level and labelled with the whole levels, and the
-    heights stretched."""
+    heights stretched; a white scene without axis panes, seen from the south-east,
+    that turns about its vertical axis."""
     width, height = box[2] - box[0], box[3] - box[1]
     longest = max(width, height)
     whole = [shown for shown in levels if shown.is_integer()]
@@ -398,17 +452,27 @@ def _layout(box, levels):
     z_aspect = min(1.1, max(0.12, z_aspect))
     return dict(
         scene=dict(
-            xaxis=dict(title="east (m)", range=[-width / 2, width / 2]),
-            yaxis=dict(title="north (m)", range=[-height / 2, height / 2]),
+            xaxis=dict(
+                title_text="east (m)", range=[-width / 2, width / 2], **AXIS_STYLE
+            ),
+            yaxis=dict(
+                title_text="north (m)", range=[-height / 2, height / 2], **AXIS_STYLE
+            ),
             zaxis=dict(
-                title="level",
+                title_text="level",
                 range=z_range,
                 tickvals=[shown * FLOOR_HEIGHT for shown in whole],
                 ticktext=["%g" % shown for shown in whole],
+                **AXIS_STYLE,
             ),
             aspectmode="manual",
             aspectratio=dict(x=width / longest, y=height / longest, z=z_aspect),
+            camera=CAMERA,
+            dragmode="turntable",
+            bgcolor=BACKGROUND_COLOUR,
         ),
+        paper_bgcolor=BACKGROUND_COLOUR,
+        hoverlabel=HOVER_LABEL,
         legend=dict(itemclick="toggle"),
         margin=dict(l=0, r=0, t=30, b=0),
     )

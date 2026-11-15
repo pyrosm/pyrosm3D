@@ -1,10 +1,17 @@
 from dataclasses import replace
 
 import numpy as np
+import pandas as pd
 import pytest
 from shapely.geometry import box
 
-from pyrosm3d.walls import _room_wall_heights, inner_walls, outer_walls, wall_panels
+from pyrosm3d.walls import (
+    _room_wall_heights,
+    building_outlines,
+    inner_walls,
+    outer_walls,
+    wall_panels,
+)
 
 
 def _length(panels):
@@ -97,7 +104,7 @@ def test_outer_walls_of_maunula_talo(maunula):
     gives them on the levels of its rooms, inside the view only and with no wall where
     the view cuts through the building; without building outlines, or with a building
     that holds no area, there are none, and a tram shelter around a platform area
-    without an indoor tag gets none."""
+    without an indoor tag gets none, as a building around a walking area would."""
     areas = maunula.areas
     view = box(*areas.total_bounds).buffer(10)
     walls, floors = outer_walls(maunula, view)
@@ -127,3 +134,37 @@ def test_outer_walls_of_maunula_talo(maunula):
     corner = maunula.buildings.iloc[:1].copy()
     corner.geometry = [box(view.bounds[0], view.bounds[1], *areas.total_bounds[:2])]
     assert outer_walls(replace(rooms, buildings=corner), view) == ({}, {})
+
+
+def test_building_outlines_of_maunula_talo(maunula):
+    """A building with level outlines has no outline of its own. Without them, the
+    building that holds the rooms has its outline on the levels of its rooms, inside
+    the view only; a station building has it on street level, also when it holds no
+    area; other buildings have none."""
+    areas = maunula.areas
+    view = box(*areas.total_bounds).buffer(10)
+    assert building_outlines(maunula, view) == {}
+
+    rooms = replace(maunula, areas=areas[areas["kind"] != "level"])
+    outlines = building_outlines(rooms, view)
+    assert sorted(outlines) == [0.0, 1.0, 2.0]
+    (building,) = outer_walls(rooms, view)[1][1.0]
+    assert _path_length(outlines[1.0]) == pytest.approx(building.length)
+    west, south, east, north = building.bounds
+    half = box(west - 10, south - 10, (west + east) / 2, north + 10)
+    inside = building.boundary.intersection(half).length
+    assert _path_length(building_outlines(rooms, half)[1.0]) == pytest.approx(inside)
+
+    buildings = maunula.buildings
+    empty = buildings[buildings.within(view) & ~buildings.intersects(areas.union_all())]
+    station = empty.iloc[:1].assign(tags=[{"building": "train_station"}])
+    others = buildings.drop(station.index)
+    with_station = replace(maunula, buildings=pd.concat([others, station]))
+    outlines = building_outlines(with_station, view)
+    assert sorted(outlines) == [0.0]
+    assert _path_length(outlines[0.0]) == pytest.approx(station.length.iloc[0])
+
+
+def _path_length(paths):
+    """The length of the lines through the points of each of ``paths`` (xy arrays)."""
+    return sum(np.hypot(*np.diff(path, axis=0).T).sum() for path in paths)

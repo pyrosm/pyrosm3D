@@ -188,6 +188,14 @@ def float_column(frame, column):
     return numbers.to_numpy(dtype=float, na_value=np.nan)
 
 
+def crosses_area(edges):
+    """Which rows of ``edges`` are lines across an area: those that
+    ``get_network(..., walking_areas=True)`` marks in its ``walking_area`` column; none
+    without the column."""
+    marks = edges.get("walking_area", pd.Series(False, index=edges.index))
+    return marks.fillna(False).to_numpy(dtype=bool)
+
+
 def level_ranges(value):
     """The levels of an OSM ``level`` value as ``(lowest, highest)`` pairs of floats,
     one for each part separated by a semicolon: ``"-1;0"`` gives ``[(-1.0, -1.0),

@@ -9,6 +9,8 @@ import pytest
 
 from pyrosm3d import plot_indoor, to_html
 from pyrosm3d.figure import level_views
+from pyrosm3d.page import _element_notes
+from pyrosm3d.styles import AREA_STYLES
 
 
 def _run_page(path, entry, clicked, size="wide"):
@@ -24,7 +26,7 @@ def _run_page(path, entry, clicked, size="wide"):
         pytest.skip("node is not installed")
     harness = Path(__file__).parent / "page_harness.js"
     command = [node, str(harness), str(path), entry, clicked, size]
-    done = subprocess.run(command, capture_output=True, text=True, check=True)
+    done = subprocess.run(command, capture_output=True, encoding="utf-8", check=True)
     return json.loads(done.stdout)
 
 
@@ -43,8 +45,11 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     """The page holds the figure of plot_indoor and loads plotly as asked; the elements
     that its script uses come before the script in the page, and a name that tries to
     end a script block stays text: it adds no script to the page and shows as it is
-    in the tags panel. A legend entry cannot be shown alone with a double click. A
-    button for all levels and one for each level show the traces of that level, drawn
+    in the tags panel, over what the element is and its level. A legend entry cannot
+    be shown alone with a double click. A
+    button for all levels and one for each level, named by its number over the number
+    of areas on it (0 on a level that has only a wall), show the traces of that level,
+    drawn
     or switched off as in the figure, list each legend entry once and set the vertical
     axis as plot_indoor does for the level. A click on a legend entry switches it off
     on every level, and a click on a room shows its tags with a link to the element;
@@ -76,7 +81,22 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
 
     figure = plot_indoor(maunula)
     shown = _run_page(path, "Rooms", "Rooms")
-    assert shown["buttons"] == ["All levels", "Level 0", "Level 1", "Level 2"]
+    assert shown["buttons"] == ["All levels", "0", "1", "2"]
+    floors = maunula.areas[maunula.areas["kind"].isin(list(AREA_STYLES))]
+    counts = [sum(level in on for on in floors["levels"]) for level in (0.0, 1.0, 2.0)]
+    assert counts[0] == 6  # four platforms, the square and the lift
+    names = ["Level %d, %d areas" % (level, count) for level, count in enumerate(counts)]
+    assert shown["names"] == ["All levels"] + names
+    assert shown["counts"] == [[]] + [["small %d" % count] for count in counts]
+    wall_above = maunula.walls.assign(levels=[(7.0,)])
+    path_above = to_html(
+        replace(maunula, walls=wall_above),
+        tmp_path / "above.html",
+        include_plotlyjs=False,
+    )
+    above = _run_page(path_above, "Rooms", "Rooms")
+    assert (above["buttons"][-1], above["names"][-1]) == ("7", "Level 7, 0 areas")
+    assert above["counts"][-1] == ["small 0"]
     views = level_views(figure)
     for button, level in zip(shown["buttons"], [None, 0.0, 1.0, 2.0]):
         view = shown["views"][button]
@@ -103,9 +123,15 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     assert key.startswith("way ") and room["tags"]["indoor"] == "room"
     assert shown["link"] == "https://www.openstreetmap.org/way/%s" % key.split()[1]
     assert key in shown["tags"] and "indoor | room" in shown["tags"]
-    assert shown["tags"].startswith("Close | " + hostile)
+    note = "room · level %g" % room["levels"][0]
+    assert shown["tags"].startswith("Close | %s | %s | %s" % (hostile, note, key))
     assert shown["tagsAfterEmptyClick"] == shown["tags"]
-    hint = "Click an area, a line or a marker to see its OpenStreetMap tags."
+    data = json.loads(page.split('id="page-data">')[1].split("</script>")[0])
+    assert set(data["about"]) == set(data["elements"]) and key in data["about"]
+    hint = (
+        "Click an area, a line, a marker or a column to see what it is and its "
+        "OpenStreetMap tags."
+    )
     assert shown["tagsAfterClose"] == hint
 
     assert shown["legendAtStart"] == {"pressed": "true", "layout": {"showlegend": True}}
@@ -123,9 +149,30 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     # A finger on the plot with one on the header is plotly's. Two fingers from 100
     # to 200 px apart: half the distance of 4, and 20 px down on a view 200 px high at
     # the distance 2: 20 * 2 / 200. A third finger moves nothing; the two that stay
-    # start anew, and half as far apart around the same point double the distance.
+    # start anew, and half as far apart around the same point double the distance,
+    # also when the browser lists the two in the other order.
     touches = shown["touches"]
     assert touches["kept"] == [False, True, True, True, True, True, False]
     assert touches["distances"] == pytest.approx([4, 2, 2, 2, 4, 4, 4])
     assert touches["pans"] == [[0, pytest.approx(0.2), 0], [0, 0, 0]]
     assert touches["saves"] == [1, 1, 1, 2]
+
+
+def test_element_notes_of_maunula_talo(maunula):
+    """The note of an element says what it is and its levels: an area by its kind (a
+    platform area also for the edges of its outline), an edge of the network by its
+    kind and the levels of its ends, a door and a shop or amenity by their levels."""
+    notes = _element_notes(maunula)
+    assert notes["way 1568797319"] == "stairwell, lift or storage · levels 0, 1, 2"
+    assert notes["way 536922648"] == "platform area · level 0"
+    assert notes["way 1576010635"] == "wall · level 2"
+    assert notes["way 674689746"] == "stairs · level 0"
+    assert notes["way 26131689"] == "walkway · level 0"
+    doors = maunula.doors
+    on_first = doors[doors["levels"].map(lambda levels: levels == (1.0,))]
+    assert notes["node %d" % on_first["id"].iloc[0]] == "door or entrance · level 1"
+    unlevelled = doors[doors["levels"].map(len) == 0]
+    assert notes["node %d" % unlevelled["id"].iloc[0]] == "door or entrance · no level"
+    shop = maunula.pois[maunula.pois["kind"] == "shop"].iloc[0]
+    key = "%s %d" % (shop["osm_type"], shop["id"])
+    assert notes[key] == "shop or amenity · level %g" % shop["levels"][0]

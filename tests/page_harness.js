@@ -146,7 +146,7 @@ function touches() {
   move([[0, 60, 120], [1, 240, 120], [2, 150, 300]]);
   lift([[1, 240, 120], [2, 150, 300]]);
   move([[1, 240, 120], [2, 150, 300]]);
-  move([[1, 217.5, 165], [2, 172.5, 255]]);
+  move([[2, 172.5, 255], [1, 217.5, 165]]);
   lift([[2, 172.5, 255]]);
   move([[2, 180, 260]]);
   lift([]);
@@ -155,11 +155,13 @@ function touches() {
 }
 
 setImmediate(() => {
-  const out = { buttons: [], views: {}, legendAtStart: legend() };
+  const out = { buttons: [], names: [], counts: [], views: {}, legendAtStart: legend() };
   elements.legend.listeners.click();
   out.legendAfterClick = legend();
   elements.levels.children.forEach((button) => {
     out.buttons.push(button.textContent);
+    out.names.push(button.attributes["aria-label"]);
+    out.counts.push(button.children.map((child) => child.tag + " " + child.textContent));
     button.listeners.click();
     const pressed = elements.levels.children.filter((b) => b.attributes["aria-pressed"] === "true");
     out.views[button.textContent] = Object.assign(shown(), { pressed: pressed.map((b) => b.textContent) });
