@@ -116,6 +116,12 @@ def test_plot_indoor_draws_maunula_talo(maunula):
     outlines = [trace for trace in traces if trace.name == "Level outlines"]
     assert [outline.meta["levels"] for outline in outlines] == [[0.0], [1.0], [2.0]]
     assert {z for z in outlines[2].z if z is not None} == {8.1}
+    assert "Building outlines" not in {trace.name for trace in traces}
+    rooms = replace(maunula, areas=maunula.areas[maunula.areas["kind"] != "level"])
+    outlines = [t for t in plot_indoor(rooms).data if t.name == "Building outlines"]
+    assert [outline.meta["levels"] for outline in outlines] == [[0.0], [1.0], [2.0]]
+    assert {z for z in outlines[1].z if z is not None} == {4.1}
+    assert {outline.hoverinfo for outline in outlines} == {"skip"}
     level_floors = _levels(traces, "Level floors")
     assert set(level_floors) == {0.0, 1.0, 2.0}
     assert {t.z[0] for t in outer if t.name == "Level floors"} == {-0.05, 3.95, 7.95}

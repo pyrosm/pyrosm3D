@@ -95,19 +95,62 @@ def outer_walls(indoor, view):
     return panels, floors
 
 
+def building_outlines(indoor, view):
+    """``{level: [xy arrays]}``: the outlines of the buildings of ``indoor`` (an
+    IndoorElements) that are drawn as lines, inside the box ``view``. A building that
+    holds indoor areas has its outline on the whole levels of those areas, and a
+    station building (``building=train_station``) also on street level; a building
+    with a level outline (``indoor=level``), which is a line already, has none."""
+    buildings, levels_in, outlined = _areas_by_building(indoor, view)
+    outlines = {}
+    columns = (buildings["tags"], buildings.geometry)
+    for found, (tags, building) in enumerate(zip(*columns)):
+        levels = set(levels_in.get(found, ()))
+        if tags.get("building") == "train_station":
+            levels.add(0.0)
+        if found not in outlined:
+            for level in levels:
+                outlines.setdefault(level, []).extend(_outline_in(building, view))
+    return outlines
+
+
 def _building_shells(indoor, view):
     """``[(levels, paths, floor)]`` of the buildings that hold indoor areas but no
-    level outline: the whole levels of those areas, the part of the building's own
-    outline inside the box ``view`` as xy arrays (where the box cuts through the
-    building, the cut is no wall) and the building's floor inside the box. An area
-    counts for the smallest building around a point inside it; a platform area or a
-    walking area without an ``indoor`` tag, which may lie under a roof or another
-    building, counts for none."""
-    buildings = [b for b in indoor.buildings.geometry if b.intersects(view)]
-    if not buildings:
-        return []
-    tree = shapely.STRtree(buildings)
+    level outline (see :func:`_areas_by_building`): the whole levels of those areas,
+    the part of the building's own outline inside the box ``view`` as xy arrays and
+    the building's floor inside the box."""
+    buildings, levels_in, outlined = _areas_by_building(indoor, view)
+    shapes = list(buildings.geometry)
+    shells = []
+    for found, whole in sorted(levels_in.items()):
+        if found in outlined or not whole:
+            continue
+        paths = _outline_in(shapes[found], view)
+        shells.append((sorted(whole), paths, shapes[found].intersection(view)))
+    return shells
+
+
+def _outline_in(building, view):
+    """The outline of the polygon ``building`` inside the box ``view`` as xy arrays;
+    where the box cuts through the building, the cut is no outline."""
+    outline = building.boundary.intersection(view)
+    return [path for path in _paths(outline) if len(path) > 1]
+
+
+def _areas_by_building(indoor, view):
+    """``(buildings, levels_in, outlined)`` of the buildings of ``indoor`` that reach
+    the box ``view`` (their rows): ``levels_in`` has, by the position of a building
+    among them, the whole levels of the areas it holds, and ``outlined`` the positions
+    of the buildings that hold a level outline. An area counts for the smallest
+    building around a point inside it; a platform area or a walking area without an
+    ``indoor`` tag, which may lie under a roof or another building, counts for
+    none."""
+    buildings = indoor.buildings[indoor.buildings.intersects(view)]
+    shapes = list(buildings.geometry)
     levels_in, outlined = {}, set()
+    if not shapes:
+        return buildings, levels_in, outlined
+    tree = shapely.STRtree(shapes)
     areas = indoor.areas
     columns = (areas["kind"], areas["levels"], areas["tags"], areas.geometry)
     for kind, levels, tags, polygon in zip(*columns):
@@ -116,20 +159,13 @@ def _building_shells(indoor, view):
         around = tree.query(polygon.representative_point(), predicate="within")
         if not len(around):
             continue
-        smallest = min(around, key=lambda found: buildings[found].area)
+        smallest = min(around, key=lambda found: shapes[found].area)
         if kind == "level":
             outlined.add(smallest)
         else:
             whole = (level for level in levels if float(level).is_integer())
             levels_in.setdefault(smallest, set()).update(whole)
-    shells = []
-    for found, whole in sorted(levels_in.items()):
-        if found in outlined or not whole:
-            continue
-        outline = buildings[found].boundary.intersection(view)
-        paths = [path for path in _paths(outline) if len(path) > 1]
-        shells.append((sorted(whole), paths, buildings[found].intersection(view)))
-    return shells
+    return buildings, levels_in, outlined
 
 
 def _room_wall_heights(kind, levels):
