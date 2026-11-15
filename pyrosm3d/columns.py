@@ -13,7 +13,7 @@ _CLIMBS = {"stairs": "stairs", "elevator": "lift"}
 
 
 def shaft_columns(indoor, room):
-    """The columns of ``indoor`` (an IndoorElements) for one kind of shaft:
+    """The columns of ``indoor`` (an IndoorLayers) for one kind of shaft:
     ``room="stairs"`` for stairwells (``room=stairs``) and ``room="elevator"`` for
     lift shafts (``room=elevator`` or ``highway=elevator``).
 

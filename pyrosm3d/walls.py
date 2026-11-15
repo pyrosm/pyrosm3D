@@ -51,7 +51,7 @@ def _closed_parts(start, along, length, doors):
 
 def inner_walls(indoor):
     """``{level: panels}`` of the walls inside the buildings of ``indoor`` (an
-    IndoorElements), see :func:`wall_panels`: along the outlines of the rooms
+    IndoorLayers), see :func:`wall_panels`: along the outlines of the rooms
     (``indoor=room``, apart from ``room=corridor``) on their whole levels, and along
     the walls mapped as lines or as areas on each of their levels. Walls are cut away
     at ``WALL_HEIGHT``; a tall room over several levels has walls a full storey high on
@@ -74,7 +74,7 @@ def inner_walls(indoor):
 
 def outer_walls(indoor, view):
     """``({level: panels}, {level: polygons})``: the outer walls of ``indoor`` (an
-    IndoorElements) inside the box ``view``, and the floors under them. The walls
+    IndoorLayers) inside the box ``view``, and the floors under them. The walls
     stand a full storey high, with door gaps, along the level outlines
     (``indoor=level``) on their whole levels, and along the outline of each building
     that holds indoor areas but no level outline, on the whole levels of those
@@ -97,7 +97,7 @@ def outer_walls(indoor, view):
 
 def building_outlines(indoor, view):
     """``{level: [xy arrays]}``: the outlines of the buildings of ``indoor`` (an
-    IndoorElements) that are drawn as lines, inside the box ``view``. A building that
+    IndoorLayers) that are drawn as lines, inside the box ``view``. A building that
     holds indoor areas has its outline on the whole levels of those areas, and a
     station building (``building=train_station``) also on street level; a building
     with a level outline (``indoor=level``), which is a line already, has none."""

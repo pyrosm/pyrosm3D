@@ -7,9 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from pyrosm3d import plot_indoor, to_html
-from pyrosm3d.figure import level_views
-from pyrosm3d.page import _element_notes
+from pyrosm3d.figure import layers_figure, level_views
+from pyrosm3d.page import _element_notes, layers_page
 from pyrosm3d.styles import AREA_STYLES
 
 
@@ -64,7 +63,7 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     hostile = "</ScRiPt><script>alert(1)</script>"
     named = [{**tags, "name": hostile} for tags in maunula.areas["tags"]]
     maunula = replace(maunula, areas=maunula.areas.assign(tags=named))
-    path = to_html(
+    path = layers_page(
         maunula, tmp_path / "maunula.html", "Maunula-talo <3D>", include_plotlyjs=False
     )
     page = path.read_text(encoding="utf-8")
@@ -76,20 +75,20 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     used = ('id="levels"', 'id="legend"', 'id="page-data"', 'id="tags"')
     for used_by_the_script in used:
         assert page.index(used_by_the_script) < plotted
-    online = to_html(maunula, tmp_path / "cdn.html", include_plotlyjs="cdn")
+    online = layers_page(maunula, tmp_path / "cdn.html", include_plotlyjs="cdn")
     assert "cdn.plot.ly" in online.read_text(encoding="utf-8")
 
-    figure = plot_indoor(maunula)
+    figure = layers_figure(maunula)
     shown = _run_page(path, "Rooms", "Rooms")
     assert shown["buttons"] == ["All levels", "0", "1", "2"]
     floors = maunula.areas[maunula.areas["kind"].isin(list(AREA_STYLES))]
     counts = [sum(level in on for on in floors["levels"]) for level in (0.0, 1.0, 2.0)]
-    assert counts[0] == 6  # four platforms, the square and the lift
+    assert counts[0] == 7  # four platforms, the two squares and the lift
     names = ["Level %d, %d areas" % (level, count) for level, count in enumerate(counts)]
     assert shown["names"] == ["All levels"] + names
     assert shown["counts"] == [[]] + [["small %d" % count] for count in counts]
     wall_above = maunula.walls.assign(levels=[(7.0,)])
-    path_above = to_html(
+    path_above = layers_page(
         replace(maunula, walls=wall_above),
         tmp_path / "above.html",
         include_plotlyjs=False,

@@ -1,7 +1,8 @@
 import networkx as nx
 import pytest
 
-from pyrosm3d import In3D, plot_indoor, plot_network
+from pyrosm3d import In3D, plot_network
+from pyrosm3d.figure import layers_figure
 
 
 def _summary(figure):
@@ -16,9 +17,9 @@ def test_in3d_draws_the_indoor_elements_of_its_osm_object(
     and to_html do: all levels, one level, and the web page with a button for each
     level."""
     in3d = In3D(maunula_osm)
-    assert _summary(in3d.plot_indoor()) == _summary(plot_indoor(maunula))
+    assert _summary(in3d.plot_indoor()) == _summary(layers_figure(maunula))
     one_level = in3d.plot_indoor(level=1)
-    assert _summary(one_level) == _summary(plot_indoor(maunula, level=1))
+    assert _summary(one_level) == _summary(layers_figure(maunula, level=1))
     assert all(1 in trace.meta["levels"] for trace in one_level.data)
 
     path = in3d.to_html(

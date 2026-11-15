@@ -1,7 +1,6 @@
 """The ``in3d`` accessor of ``pyrosm.OSM``: 3D views of what an OSM object reads."""
 
 from pyrosm3d.figure import plot_indoor
-from pyrosm3d.indoor import indoor_layers
 from pyrosm3d.network import plot_network
 from pyrosm3d.page import to_html
 
@@ -23,16 +22,18 @@ class In3D:
     def __init__(self, osm):
         self._osm = osm
 
-    def _indoor_layers(self):
-        """The layers of the indoor views, from the reads of the OSM object: its indoor
+    def _indoor_frames(self):
+        """The frames of the indoor views, from the reads of the OSM object: its indoor
         elements with the walking areas, the walking network with indoor elements and
-        walking areas, and the buildings."""
+        walking areas, and the buildings; as the arguments of
+        :func:`pyrosm3d.plot_indoor`."""
         osm = self._osm
         nodes, edges = osm.get_network(
             "walking", nodes=True, indoor_elements=True, walking_areas=True
         )
         elements = osm.get_indoor_elements(walking_areas=True)
-        return indoor_layers(elements, nodes, edges, osm.get_buildings())
+        buildings = osm.get_buildings()
+        return dict(elements=elements, edges=edges, nodes=nodes, buildings=buildings)
 
     def plot_indoor(self, level=None):
         """A plotly Figure of the indoor elements in 3D: the floors of rooms,
@@ -50,7 +51,7 @@ class In3D:
         plotly.graph_objects.Figure
             The figure of :func:`pyrosm3d.plot_indoor`.
         """
-        return plot_indoor(self._indoor_layers(), level=level)
+        return plot_indoor(**self._indoor_frames(), level=level)
 
     def to_html(self, path, title="Indoor elements", include_plotlyjs=True):
         """Write a web page with the 3D view of the indoor elements: the figure of
@@ -73,7 +74,12 @@ class In3D:
         pathlib.Path
             The file written, as :func:`pyrosm3d.to_html` writes it.
         """
-        return to_html(self._indoor_layers(), path, title, include_plotlyjs)
+        return to_html(
+            path=path,
+            title=title,
+            include_plotlyjs=include_plotlyjs,
+            **self._indoor_frames(),
+        )
 
     def plot_network(
         self, network_type="walking", center=None, radius=None, route=None, graph=None

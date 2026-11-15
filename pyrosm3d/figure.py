@@ -20,6 +20,7 @@ import shapely
 
 from pyrosm3d.columns import shaft_columns
 from pyrosm3d.floors import floor_levels, floor_openings, triangles
+from pyrosm3d.indoor import indoor_layers
 from pyrosm3d.network import (
     _STYLES,
     _Trace,
@@ -61,15 +62,22 @@ _FLAT_LIGHT = dict(ambient=1, diffuse=0, specular=0, roughness=1, fresnel=0)
 _HEIGHT_STRETCH = 2.2
 
 
-def plot_indoor(indoor, level=None):
-    """A plotly Figure of indoor elements in 3D (see the module docstring).
+def plot_indoor(elements, edges=None, nodes=None, buildings=None, level=None):
+    """A plotly Figure of indoor elements in 3D (see the module docstring), from frames
+    read with pyrosm (``osm`` is a ``pyrosm.OSM`` object); ``osm.in3d.plot_indoor()``
+    makes these reads itself.
 
     Parameters
     ----------
-    indoor : IndoorElements
-        The layers that :func:`pyrosm3d.indoor_layers` returns. The figure shows the
-        areas and what lies within 10 m of them; a walking area, such as a square
-        or a pedestrian street, is drawn as far as the other areas' view reaches.
+    elements : GeoDataFrame
+        ``osm.get_indoor_elements(walking_areas=True)``. The figure shows the areas
+        and what lies within 10 m of them; a walking area, such as a square or a
+        pedestrian street, is drawn as far as the other areas' view reaches.
+    edges, nodes : GeoDataFrame (optional)
+        ``osm.get_network("walking", nodes=True, indoor_elements=True,
+        walking_areas=True)``, drawn on its levels.
+    buildings : GeoDataFrame (optional)
+        ``osm.get_buildings()``, for the outlines.
     level : float (optional)
         Draw only what is on this level, without the columns of stairwells and lift
         shafts; by default all levels.
@@ -80,6 +88,12 @@ def plot_indoor(indoor, level=None):
         A click on a legend entry hides or shows it. The outer walls, the doors and
         the shops are hidden until they are picked in the legend.
     """
+    return layers_figure(indoor_layers(elements, nodes, edges, buildings), level)
+
+
+def layers_figure(indoor, level=None):
+    """The figure of :func:`plot_indoor` for the layers ``indoor`` (an IndoorLayers,
+    see :func:`pyrosm3d.indoor.indoor_layers`)."""
     box = _view_box(indoor)
     view = shapely.box(*box)
     origin = ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)

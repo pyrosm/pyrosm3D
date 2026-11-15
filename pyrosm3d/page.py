@@ -10,14 +10,24 @@ from string import Template
 
 import plotly.io
 
-from pyrosm3d.figure import level_views, plot_indoor
+from pyrosm3d.figure import layers_figure, level_views
+from pyrosm3d.indoor import indoor_layers
 from pyrosm3d.network import EDGE_NAMES, _edge_kinds, end_levels_text
 from pyrosm3d.styles import AREA_STYLES, DOOR_STYLE, POI_STYLE
 from pyrosm3d.tags import element_keys, row_tags
 
 
-def to_html(indoor, path, title="Indoor elements", include_plotlyjs=True):
-    """Write a web page with the 3D view of indoor elements.
+def to_html(
+    elements,
+    path,
+    edges=None,
+    nodes=None,
+    buildings=None,
+    title="Indoor elements",
+    include_plotlyjs=True,
+):
+    """Write a web page with the 3D view of indoor elements, from frames read with
+    pyrosm; ``osm.in3d.to_html(path)`` makes these reads itself.
 
     The page shows the figure of :func:`pyrosm3d.plot_indoor`. Its buttons show all
     levels or one level (each level's button has the number of areas on it) and show
@@ -29,10 +39,15 @@ def to_html(indoor, path, title="Indoor elements", include_plotlyjs=True):
 
     Parameters
     ----------
-    indoor : IndoorElements
-        The layers that :func:`pyrosm3d.indoor_layers` returns.
+    elements : GeoDataFrame
+        ``osm.get_indoor_elements(walking_areas=True)``.
     path : str or pathlib.Path
         The HTML file to write.
+    edges, nodes : GeoDataFrame (optional)
+        ``osm.get_network("walking", nodes=True, indoor_elements=True,
+        walking_areas=True)``.
+    buildings : GeoDataFrame (optional)
+        ``osm.get_buildings()``.
     title : str
         The title of the page.
     include_plotlyjs : bool or "cdn"
@@ -45,7 +60,14 @@ def to_html(indoor, path, title="Indoor elements", include_plotlyjs=True):
     pathlib.Path
         The file written.
     """
-    figure = plot_indoor(indoor)
+    indoor = indoor_layers(elements, nodes, edges, buildings)
+    return layers_page(indoor, path, title, include_plotlyjs)
+
+
+def layers_page(indoor, path, title="Indoor elements", include_plotlyjs=True):
+    """The page of :func:`to_html` for the layers ``indoor`` (an IndoorLayers, see
+    :func:`pyrosm3d.indoor.indoor_layers`)."""
+    figure = layers_figure(indoor)
     # The page keeps track of the legend entries that are switched off; a double click
     # would show one entry alone behind its back
     figure.update_layout(legend_itemdoubleclick=False)

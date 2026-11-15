@@ -34,7 +34,7 @@ _LINE_SHAPES = ("LineString", "MultiLineString")
 
 
 @dataclass
-class IndoorElements:
+class IndoorLayers:
     """The layers of a place that :func:`pyrosm3d.plot_indoor` draws, as
     :func:`indoor_layers` makes them from pyrosm's frames: GeoDataFrames in the metres
     of one UTM zone.
@@ -42,18 +42,19 @@ class IndoorElements:
     Apart from the network, each frame has the columns ``id`` and ``osm_type`` of its
     elements, ``tags`` (a dict of an element's OSM tags) and the geometry. ``levels``
     is a tuple of the levels an element is on, as pyrosm lists them in its ``levels``
-    column. An area without a level that is a platform, or that lines of the network
-    cross, has the level of its lines in the network; where these have none, its layer
-    when that is below street level, else street level (0).
+    column. An area without a level that is a platform or a walking area, or that
+    lines of the network cross, has the level of its lines in the network; where these
+    have none, its layer when that is below street level, else street level (0).
 
     Attributes
     ----------
     areas : GeoDataFrame
         The polygons with an ``indoor`` tag, the platform areas (``railway``,
         ``public_transport`` or ``highway`` is ``platform``), the lift areas
-        (``highway=elevator``) and the other areas that lines of the network cross,
-        such as a square or a station hall mapped as ``highway=pedestrian``, with
-        ``levels`` and a ``kind``: ``wall``, ``level`` (the outline of a floor),
+        (``highway=elevator``), the walking areas, such as a square or a station hall
+        mapped as ``highway=pedestrian``, and the other areas that lines of the network
+        cross, with ``levels`` and a ``kind``: ``wall``, ``level`` (the outline of a
+        floor),
         ``platform``, ``corridor``, ``shaft`` (stairwells, lifts and technical
         rooms), ``walking_area`` (an area without an ``indoor`` tag that is none of
         these), ``toilets``, ``shop``, ``room``, or ``indoor`` for ``indoor=yes`` and
@@ -98,7 +99,7 @@ def indoor_layers(elements=None, nodes=None, edges=None, buildings=None):
 
     Returns
     -------
-    IndoorElements
+    IndoorLayers
     """
     elements, buildings = _found(elements), _found(buildings)
     nodes, edges = _found(nodes), _found(edges)
@@ -111,10 +112,7 @@ def indoor_layers(elements=None, nodes=None, edges=None, buildings=None):
     tags = row_tags(elements.drop(columns="levels", errors="ignore"))
     keys = element_keys(elements)
     is_area = _has_shape(elements, _AREA_SHAPES) & np.array(
-        [
-            key in crossed or _is_indoor_platform_or_lift(row)
-            for key, row in zip(keys, tags)
-        ],
+        [key in crossed or _is_drawn_as_area(row) for key, row in zip(keys, tags)],
         dtype=bool,
     )
     is_wall = _where(tags, lambda row: row.get("indoor") == "wall")
@@ -128,7 +126,7 @@ def indoor_layers(elements=None, nodes=None, edges=None, buildings=None):
     pois = _layer(elements, tags, levels, is_poi & has_level, crs, kind=_poi_kind)
     pois.geometry = _marker_points(pois.geometry)
     areas = _layer(elements, tags, levels, is_area, crs, kind=area_kind)
-    return IndoorElements(
+    return IndoorLayers(
         areas=_with_line_levels(areas, edges, crossed),
         walls=_layer(elements, tags, levels, is_wall_line, crs),
         doors=_layer(elements, tags, levels, is_door_node, crs),
@@ -147,11 +145,12 @@ def _listed_levels(text):
     return tuple(float(level) for level in text.split(";"))
 
 
-def _is_indoor_platform_or_lift(tags):
+def _is_drawn_as_area(tags):
     """Whether a polygon with the OSM ``tags`` is an area also where no line crosses
-    it: it has an ``indoor`` tag, is a platform, or is a lift area
-    (``highway=elevator``)."""
-    return "indoor" in tags or is_platform(tags) or tags.get("highway") == "elevator"
+    it: it has an ``indoor`` tag, is a platform, or has a ``highway`` tag (a lift area,
+    or a walking area such as a square). A shop or an amenity mapped as a polygon
+    without these is a marker only."""
+    return "indoor" in tags or "highway" in tags or is_platform(tags)
 
 
 def _crossed_areas(edges):
@@ -167,7 +166,7 @@ def _where(tags, fits):
 
 
 def area_kind(tags):
-    """The kind of an indoor area with the OSM ``tags`` (see :class:`IndoorElements`),
+    """The kind of an indoor area with the OSM ``tags`` (see :class:`IndoorLayers`),
     the first that fits."""
     indoor, room, amenity = (tags.get(key) for key in ("indoor", "room", "amenity"))
     if indoor in ("wall", "level"):
@@ -188,10 +187,10 @@ def area_kind(tags):
 
 
 def _with_line_levels(areas, edges, crossed):
-    """``areas`` with a level for each area that has none and is a platform or among
-    ``crossed`` (see :func:`_crossed_areas`): the lowest level that pyrosm gave its
-    lines among ``edges`` (``u_level`` and ``v_level``); where these have none, the
-    level of :func:`pyrosm3d.tags.layer_level`."""
+    """``areas`` with a level for each area that has none and is a platform, a walking
+    area or among ``crossed`` (see :func:`_crossed_areas`): the lowest level that
+    pyrosm gave its lines among ``edges`` (``u_level`` and ``v_level``); where these
+    have none, the level of :func:`pyrosm3d.tags.layer_level`."""
     ends = (float_column(edges, "u_level"), float_column(edges, "v_level"))
     on_lines = {}
     for key, level in zip(element_keys(edges), np.fmin(*ends).tolist()):
@@ -200,7 +199,8 @@ def _with_line_levels(areas, edges, crossed):
     levels = areas["levels"].tolist()
     columns = (element_keys(areas), areas["kind"], areas["tags"])
     for row, (key, kind, tags) in enumerate(zip(*columns)):
-        if not levels[row] and (kind == "platform" or key in crossed):
+        placed_by_lines = kind in ("platform", "walking_area") or key in crossed
+        if not levels[row] and placed_by_lines:
             levels[row] = (on_lines.get(key, layer_level(tags)),)
     return areas.assign(levels=levels)
 
