@@ -100,9 +100,9 @@ def _building_shells(indoor, view):
     level outline: the whole levels of those areas, the part of the building's own
     outline inside the box ``view`` as xy arrays (where the box cuts through the
     building, the cut is no wall) and the building's floor inside the box. An area
-    counts for the smallest building around a point inside it; a platform area without
-    an ``indoor`` tag, which may lie under a roof or another building, counts for
-    none."""
+    counts for the smallest building around a point inside it; a platform area or a
+    walking area without an ``indoor`` tag, which may lie under a roof or another
+    building, counts for none."""
     buildings = [b for b in indoor.buildings.geometry if b.intersects(view)]
     if not buildings:
         return []
@@ -111,7 +111,7 @@ def _building_shells(indoor, view):
     areas = indoor.areas
     columns = (areas["kind"], areas["levels"], areas["tags"], areas.geometry)
     for kind, levels, tags, polygon in zip(*columns):
-        if kind == "platform" and "indoor" not in tags:
+        if kind in ("platform", "walking_area") and "indoor" not in tags:
             continue
         around = tree.query(polygon.representative_point(), predicate="within")
         if not len(around):

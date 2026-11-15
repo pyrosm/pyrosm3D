@@ -97,7 +97,7 @@ def test_outer_walls_of_maunula_talo(maunula):
     gives them on the levels of its rooms, inside the view only and with no wall where
     the view cuts through the building; without building outlines, or with a building
     that holds no area, there are none, and a tram shelter around a platform area
-    without an indoor tag gets none."""
+    without an indoor tag gets none, as a building around a walking area would."""
     areas = maunula.areas
     view = box(*areas.total_bounds).buffer(10)
     walls, floors = outer_walls(maunula, view)

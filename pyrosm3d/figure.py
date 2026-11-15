@@ -63,7 +63,8 @@ def plot_indoor(indoor, level=None):
     ----------
     indoor : IndoorElements
         The elements that :func:`pyrosm3d.read_indoor` returns. The figure shows the
-        areas and what lies within 10 m of them.
+        areas and what lies within 10 m of them; a walking area, such as a square
+        or a pedestrian street, is drawn as far as the other areas' view reaches.
     level : float (optional)
         Draw only what is on this level, without the columns of stairwells and lift
         shafts; by default all levels.
@@ -86,8 +87,8 @@ def plot_indoor(indoor, level=None):
     )
     outer, level_floors = outer_walls(indoor, view)
     traces = (
-        _floor_traces(indoor.areas, floor_openings(indoor.edges), origin)
-        + _outline_traces(indoor.areas, origin)
+        _floor_traces(indoor.areas, floor_openings(indoor.edges), origin, view)
+        + _outline_traces(indoor.areas, origin, view)
         + _wall_traces(inner_walls(indoor), WALL_NAME, origin)
         + _wall_traces(outer, OUTER_WALL_NAME, origin, hidden=True)
         + _level_floor_traces(level_floors, origin)
@@ -112,10 +113,13 @@ def plot_indoor(indoor, level=None):
 
 
 def _view_box(indoor):
-    """``(west, south, east, north)`` of the view: the bounds of the areas, or of the
-    network where there are no areas, with a margin."""
-    frame = indoor.areas if len(indoor.areas) else indoor.edges
-    if frame.empty:
+    """``(west, south, east, north)`` of the view: the bounds of the areas other than
+    walking areas, of the walking areas where there are no others, or of the network
+    where there are no areas, with a margin."""
+    areas = indoor.areas
+    frames = (areas[areas["kind"] != "walking_area"], areas, indoor.edges)
+    frame = next((frame for frame in frames if len(frame)), None)
+    if frame is None:
         raise ValueError("plot_indoor got no areas and no network to draw.")
     west, south, east, north = frame.total_bounds
     return (
@@ -126,17 +130,28 @@ def _view_box(indoor):
     )
 
 
-def _floor_traces(areas, openings, origin):
-    """The floors of ``areas`` as meshes of triangles, one for each kind of area and
-    level, the kinds in the order of ``AREA_STYLES``; a floor is open where the
-    polygon of its level in ``openings`` crosses it."""
+def _inside(shape, view):
+    """The parts of ``shape``, a polygon or lines, inside the box ``view``: a list of
+    polygons or of lines, empty where ``shape`` lies outside the box."""
+    if view.contains(shape):
+        return list(shapely.get_parts(shape))
+    kind = "Polygon" if shape.geom_type.endswith("Polygon") else "LineString"
+    parts = shapely.get_parts(shape.intersection(view))
+    return [part for part in parts if part.geom_type == kind and not part.is_empty]
+
+
+def _floor_traces(areas, openings, origin, view):
+    """The floors of ``areas`` inside the box ``view`` as meshes of triangles, one for
+    each kind of area and level, the kinds in the order of ``AREA_STYLES``; a floor is
+    open where the polygon of its level in ``openings`` crosses it."""
     floors = {}
     columns = (areas["kind"], areas["levels"], areas["tags"], areas.geometry)
     for key, kind, levels, tags, polygon in zip(element_keys(areas), *columns):
         if kind not in AREA_STYLES:
             continue
         name = tags.get("name") or tags.get("ref") or AREA_STYLES[kind][2]
-        for level in floor_levels(kind, levels):
+        polygon = shapely.MultiPolygon(_inside(polygon, view))
+        for level in floor_levels(kind, levels) if not polygon.is_empty else ():
             floor = polygon
             if level in openings and polygon.intersects(openings[level]):
                 floor = polygon.difference(openings[level])
@@ -289,9 +304,10 @@ def _column_traces(indoor, origin):
     return traces
 
 
-def _outline_traces(areas, origin):
-    """The outlines of the ``areas`` as lines: of those that have a floor, on each
-    level of their floors, and of the level outlines, on each of their levels."""
+def _outline_traces(areas, origin, view):
+    """The outlines of the ``areas`` inside the box ``view`` as lines: of those that
+    have a floor, on each level of their floors, and of the level outlines, on each of
+    their levels."""
     rooms, levels = _LevelLines(), _LevelLines()
     for kind, on_levels, area in zip(areas["kind"], areas["levels"], areas.geometry):
         if kind == "level":
@@ -300,10 +316,11 @@ def _outline_traces(areas, origin):
             lines, lift, on_levels = rooms, _OUTLINE_LIFT, floor_levels(kind, on_levels)
         else:
             continue
+        outline = _inside(area.boundary, view)
         for level in on_levels:
             z = level * FLOOR_HEIGHT + lift
-            for ring in shapely.get_rings(shapely.get_parts(area)):
-                lines.add([level], *_line_points(ring, z, z, origin), "outline")
+            for line in outline:
+                lines.add([level], *_line_points(line, z, z, origin), "outline")
     traces = rooms.traces("Room and corridor outlines", OUTLINE_COLOUR, 1.5)
     traces += levels.traces("Level outlines", LEVEL_OUTLINE_COLOUR, 2.5)
     return [trace.update(hoverinfo="skip", hovertemplate=None) for trace in traces]

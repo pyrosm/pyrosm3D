@@ -16,6 +16,7 @@ import shapely
 from geopandas import GeoDataFrame
 
 from pyrosm3d.tags import (
+    crosses_area,
     float_column,
     is_platform,
     layer_level,
@@ -121,11 +122,7 @@ def _edge_kinds(edges):
     tags = row_tags(edges)
     u_levels, v_levels = (float_column(edges, col) for col in ("u_level", "v_level"))
     verticals = edges.get("vertical", pd.Series(None, index=edges.index)).to_numpy()
-    crossings = (
-        edges.get("walking_area", pd.Series(False, index=edges.index))
-        .fillna(False)
-        .to_numpy(dtype=bool)
-    )
+    crossings = crosses_area(edges)
     for i, (edge_tags, row) in enumerate(zip(tags, edges.itertuples())):
         kind, z_u, z_v = _edge_kind(
             edge_tags, verticals[i], u_levels[i], v_levels[i], crossings[i]

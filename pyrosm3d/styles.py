@@ -26,6 +26,7 @@ AREA_STYLES = {
     "indoor": ("Other indoor areas", "#e7eaee", "indoor area"),
     "shaft": ("Stairwells, lifts, storage", "#c9cbce", "stairwell, lift or storage"),
     "platform": ("Platform areas", "#bfe6d3", "platform area"),
+    "walking_area": ("Walking areas", "#dad6ea", "walking area"),
 }
 OUTLINE_COLOUR = "#8a8f98"
 LEVEL_OUTLINE_COLOUR = "#b9a99c"

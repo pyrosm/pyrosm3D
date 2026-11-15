@@ -6,7 +6,7 @@ from geopandas import GeoDataFrame
 from shapely.geometry import LineString, box
 
 from pyrosm3d import IndoorElements, read_indoor
-from pyrosm3d.indoor import _with_platform_levels, area_kind
+from pyrosm3d.indoor import _INDOOR_FILTER, _area_filter, _with_line_levels, area_kind
 
 _LAYER_COLUMNS = ["id", "osm_type", "kind", "levels", "tags", "geometry"]
 
@@ -16,23 +16,30 @@ def test_read_indoor_reads_maunula_talo(maunula):
     zone: the areas with their kinds and levels (a lift through three floors is a
     shaft on all of them, a wall mapped as an area is a wall, the bus and tram
     platforms beside the building, which have no indoor and no level tag, are
-    platforms on street level), the wall mapped as a line, the doors, the shops and
-    amenities that have a level as points, the building outlines and the walking
-    network with its stairs."""
+    platforms on street level, and so is the square that lines of the network cross,
+    a walking area, while a square that no line crosses is left out), the wall mapped
+    as a line, the doors, the shops and amenities that have a level as points, the
+    building outlines and the walking network with its stairs."""
     assert isinstance(maunula, IndoorElements)
     layers = (maunula.areas, maunula.walls, maunula.doors, maunula.pois)
     frames = layers + (maunula.buildings, maunula.nodes, maunula.edges)
-    assert [len(frame) for frame in frames] == [64, 1, 158, 9, 37, 890, 1064]
+    assert [len(frame) for frame in frames] == [65, 1, 158, 9, 37, 890, 1064]
     assert {frame.crs.to_epsg() for frame in frames} == {32635}
 
     areas = maunula.areas
     assert list(areas.columns) == _LAYER_COLUMNS
     assert set(areas.geometry.geom_type) == {"Polygon"}
     kinds = {"room": 42, "corridor": 8, "level": 5, "platform": 4, "shaft": 3}
-    assert Counter(areas["kind"]) == {**kinds, "toilets": 1, "wall": 1}
+    kinds.update(toilets=1, wall=1, walking_area=1)
+    assert Counter(areas["kind"]) == kinds
     platforms = areas[areas["kind"] == "platform"]
     assert set(platforms["levels"]) == {(0.0,)}
     assert not any("indoor" in tags or "level" in tags for tags in platforms["tags"])
+    square = areas[areas["kind"] == "walking_area"].iloc[0]
+    assert (square["id"], square["levels"]) == (1250318665, (0.0,))
+    assert square["tags"]["highway"] == "pedestrian" and "level" not in square["tags"]
+    assert square.geometry.area == pytest.approx(579.9, abs=0.1)
+    assert 674689752 not in set(areas["id"])
     lift = areas[areas["id"] == 1568797319].iloc[0]
     assert (lift["kind"], lift["levels"]) == ("shaft", (0.0, 1.0, 2.0))
     assert lift["tags"]["level"] == "0-2" and lift["tags"]["room"] == "elevator"
@@ -113,6 +120,7 @@ def test_read_indoor_needs_a_pyrosm_with_indoor_reads():
         ({"indoor": "room", "room": "corridor"}, "corridor"),
         ({"indoor": "room", "room": "technical"}, "shaft"),
         ({"highway": "elevator"}, "shaft"),
+        ({"highway": "pedestrian", "amenity": "toilets"}, "walking_area"),
         ({"indoor": "room", "amenity": "toilets"}, "toilets"),
         ({"indoor": "room", "room": "toilets"}, "toilets"),
         ({"indoor": "room", "shop": "kiosk"}, "shop"),
@@ -124,17 +132,40 @@ def test_read_indoor_needs_a_pyrosm_with_indoor_reads():
 )
 def test_area_kind(tags, kind):
     """The kind of an area is the first that fits: a wall or a level outline, a
-    platform, a corridor, a shaft, toilets, a shop or place to eat, else a room, or
-    ``indoor`` for an area tagged only indoor=yes or indoor=no."""
+    platform, a corridor, a shaft, a walking area (no indoor tag), toilets, a shop or
+    place to eat, else a room, or ``indoor`` for an area tagged only indoor=yes or
+    indoor=no."""
     assert area_kind(tags) == kind
 
 
-def test_platform_areas_without_a_level_get_one():
-    """A platform area without a level is on the lowest level that pyrosm gave its
-    lines in the network (the lines of another element with its id do not count),
-    without one on its layer below street level, else on street level, also when its
-    ``level`` tag gives no level; the levels of its own ``level`` tag stay, and so
-    does the missing level of another kind of area."""
+def test_area_filter_reads_the_crossed_areas():
+    """The read for the areas takes the indoor elements, the lift areas and the
+    platforms, and for each crossed area that these leave out its ``highway`` value,
+    or its ``room`` value where it has no ``highway`` tag; a crossed area with neither
+    adds nothing."""
+    assert _area_filter({}) == _INDOOR_FILTER
+    crossed = {
+        "way 1": {"highway": "pedestrian", "area": "yes"},
+        "way 2": {"highway": "footway", "indoor": "corridor"},
+        "relation 3": {"room": "hall"},
+        "way 4": {"highway": "service", "room": "lobby"},
+        "way 5": {"highway": "footway", "railway": "platform"},
+        "way 6": {"name": "Square"},
+    }
+    assert _area_filter(crossed) == {
+        **_INDOOR_FILTER,
+        "highway": ["elevator", "pedestrian", "platform", "service"],
+        "room": ["hall"],
+    }
+
+
+def test_areas_without_a_level_get_one():
+    """A platform area without a level, and an area without one that lines of the
+    network cross, is on the lowest level that pyrosm gave its lines in the network
+    (the lines of another element with its id do not count), without one on its layer
+    below street level, else on street level, also when its ``level`` tag gives no
+    level; the levels of its own ``level`` tag stay, and so does the missing level of
+    another area that no line crosses."""
     cases = [
         (1, "way", "platform", (), {}, (-2.0,)),
         (2, "relation", "platform", (), {"layer": "-1"}, (-1.0,)),
@@ -142,6 +173,8 @@ def test_platform_areas_without_a_level_get_one():
         (6, "way", "platform", (), {"level": "ground"}, (0.0,)),
         (4, "way", "platform", (1.0,), {"level": "1"}, (1.0,)),
         (5, "way", "room", (), {}, ()),
+        (7, "way", "walking_area", (), {"highway": "pedestrian"}, (0.0,)),
+        (8, "way", "corridor", (), {"indoor": "area"}, (2.0,)),
     ]
     ids, types, kinds, levels, tags, expected = zip(*cases)
     areas = GeoDataFrame(
@@ -151,12 +184,13 @@ def test_platform_areas_without_a_level_get_one():
     )
     edges = GeoDataFrame(
         {
-            "id": [1, 1, 2, 4, 5],
-            "osm_type": ["way"] * 5,
-            "u_level": [np.nan, -2.0, -3.0, 0.0, 2.0],
-            "v_level": [np.nan, -1.0, -3.0, 0.0, 2.0],
+            "id": [1, 1, 2, 4, 5, 7, 8],
+            "osm_type": ["way"] * 7,
+            "u_level": [np.nan, -2.0, -3.0, 0.0, 2.0, np.nan, 3.0],
+            "v_level": [np.nan, -1.0, -3.0, 0.0, 2.0, np.nan, 2.0],
         },
-        geometry=[LineString([(0, 0), (1, 1)])] * 5,
+        geometry=[LineString([(0, 0), (1, 1)])] * 7,
         crs=32635,
     )
-    assert tuple(_with_platform_levels(areas, edges)["levels"]) == expected
+    crossed = {"way 7": tags[6], "way 8": tags[7]}
+    assert tuple(_with_line_levels(areas, edges, crossed)["levels"]) == expected
