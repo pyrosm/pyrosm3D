@@ -99,6 +99,7 @@ def layers_figure(indoor, level=None):
     origin = ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
     indoor = replace(
         indoor,
+        areas=_areas_inside(indoor.areas, view),
         walls=indoor.walls[indoor.walls.intersects(view)],
         doors=indoor.doors[indoor.doors.within(view)],
         pois=indoor.pois[indoor.pois.within(view)],
@@ -151,13 +152,17 @@ def _view_box(indoor):
 
 
 def areas_in_view(indoor):
-    """The areas of ``indoor`` (an IndoorLayers) that the figure draws a part of: those
-    with a part inside its view (see :func:`_view_box`, :func:`_inside`). A walking
-    area that lies outside the view of the other areas, or only touches it, has no
-    floor and no outline in the figure."""
-    view = shapely.box(*_view_box(indoor))
-    in_view = [bool(_inside(shape, view)) for shape in indoor.areas.geometry]
-    return indoor.areas[in_view]
+    """The areas of ``indoor`` (an IndoorLayers) that its figure draws: those with a
+    part inside its view (see :func:`_view_box`, :func:`_areas_inside`)."""
+    return _areas_inside(indoor.areas, shapely.box(*_view_box(indoor)))
+
+
+def _areas_inside(areas, view):
+    """The rows of ``areas`` with a part inside the box ``view`` (see
+    :func:`_inside`). A walking area that lies outside the view of the other areas,
+    or only touches it, is left out: it has no floor and no outline in the figure."""
+    in_view = [bool(_inside(shape, view)) for shape in areas.geometry]
+    return areas[np.array(in_view, dtype=bool)]
 
 
 def _inside(shape, view):

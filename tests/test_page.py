@@ -162,7 +162,7 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
 def test_level_counts_leave_out_areas_outside_the_view(maunula, tmp_path):
     """The count on a level's button holds the areas that the figure draws: a walking
     area that lies outside the view of the other areas, or only touches its edge, is
-    not counted."""
+    not counted and has no floor and no outline."""
     areas = maunula.areas
     is_square = areas["id"] == 674689752
     _, south, east, _ = _view_box(maunula)
@@ -172,15 +172,18 @@ def test_level_counts_leave_out_areas_outside_the_view(maunula, tmp_path):
         "far": areas.geometry.where(~is_square, areas.translate(5000)),
         "touching": areas.geometry.where(~is_square, beside_the_view),
     }
-    counts = {}
+    counts, drawn = {}, {}
     for name, geometry in moved.items():
         layers = replace(maunula, areas=areas.assign(geometry=geometry))
         path = layers_page(layers, tmp_path / (name + ".html"), include_plotlyjs="cdn")
         page = path.read_text(encoding="utf-8")
         data = json.loads(re.search(r'id="page-data">(.*?)</script>', page, re.S)[1])
         counts[name] = dict(zip(data["levels"], data["counts"]))
+        figure = layers_figure(layers)
+        drawn[name] = [(trace.name, len(trace.x)) for trace in figure.data]
     assert counts["near"][0.0] == 7  # four platforms, the two squares and the lift
     assert counts["far"] == counts["touching"] == {**counts["near"], 0.0: 6}
+    assert drawn["far"] == drawn["touching"] != drawn["near"]
 
 
 def test_element_notes_of_maunula_talo(maunula):
