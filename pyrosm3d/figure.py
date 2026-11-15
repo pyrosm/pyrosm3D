@@ -42,6 +42,7 @@ from pyrosm3d.styles import (
     WALL_NAME,
     WALL_STYLE,
 )
+from pyrosm3d.tags import element_keys
 from pyrosm3d.walls import inner_walls, outer_walls, wall_panels
 
 # Metres that outlines and network lines are drawn above their floor, to stay visible
@@ -152,14 +153,6 @@ def _floor_traces(areas, openings, origin):
             floor.update(hoverinfo="text", hovertext=text, customdata=keys)
             traces.append(floor)
     return traces
-
-
-def element_keys(frame):
-    """A key such as ``"way 123"`` for each row of ``frame``: its ``osm_type`` (way
-    without the column) and ``id``. The traces of :func:`plot_indoor` carry the key of
-    the element at each of their points as ``customdata``."""
-    types = frame["osm_type"] if "osm_type" in frame.columns else ["way"] * len(frame)
-    return ["%s %s" % element for element in zip(types, frame["id"])]
 
 
 class _LevelLines:

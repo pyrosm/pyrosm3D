@@ -10,8 +10,8 @@ from string import Template
 
 import plotly.io
 
-from pyrosm3d.figure import element_keys, level_views, plot_indoor
-from pyrosm3d.tags import row_tags
+from pyrosm3d.figure import level_views, plot_indoor
+from pyrosm3d.tags import element_keys, row_tags
 
 
 def to_html(indoor, path, title="Indoor elements", include_plotlyjs=True):
@@ -80,7 +80,7 @@ def to_html(indoor, path, title="Indoor elements", include_plotlyjs=True):
 
 def _drawn_elements(indoor, figure):
     """``{key: tags}`` of the elements of ``indoor`` that ``figure`` draws, by the keys
-    its traces carry (see :func:`pyrosm3d.figure.element_keys`)."""
+    its traces carry (see :func:`pyrosm3d.tags.element_keys`)."""
     drawn = set()
     for trace in figure.data:
         drawn.update(key for key in trace.customdata or () if key)

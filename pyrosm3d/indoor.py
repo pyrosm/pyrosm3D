@@ -9,8 +9,23 @@ import numpy as np
 import shapely
 from geopandas import GeoDataFrame, GeoSeries
 
-from pyrosm3d.tags import row_tags, tag_levels
+from pyrosm3d.tags import (
+    element_keys,
+    float_column,
+    is_platform,
+    layer_level,
+    row_tags,
+    tag_levels,
+)
 
+# What is read for the areas and the walls: the elements with an indoor tag, the lifts
+# mapped as areas and the platforms
+_INDOOR_FILTER = {
+    "indoor": True,
+    "highway": ["elevator", "platform"],
+    "railway": ["platform"],
+    "public_transport": ["platform"],
+}
 # The rooms that are shafts: a space between floors, or one that people do not use
 _SHAFT_ROOMS = {"stairs", "elevator", "utility", "storage", "technical"}
 # The amenities that are drawn as shops
@@ -35,16 +50,20 @@ class IndoorElements:
     Apart from the network, each frame has the columns ``id`` and ``osm_type`` of its
     elements, ``tags`` (a dict of an element's OSM tags) and the geometry. ``levels``
     is a tuple of the levels an element is on, from its ``level`` tag: the ends of each
-    range and the whole levels between them.
+    range and the whole levels between them. A platform area without a level (no
+    ``level`` tag, or one that gives no level) has the level of its lines in the
+    network; where these have none, its layer when that is below street level, else
+    street level (0).
 
     Attributes
     ----------
     areas : GeoDataFrame
-        The polygons with an ``indoor`` tag and the lift areas (``highway=elevator``),
-        with ``levels`` and a ``kind``: ``wall``, ``level`` (the outline of a floor),
-        ``platform``, ``corridor``, ``shaft`` (stairwells, lifts and technical rooms),
-        ``toilets``, ``shop``, ``room``, or ``indoor`` for ``indoor=yes`` and
-        ``indoor=no``.
+        The polygons with an ``indoor`` tag, the platform areas (``railway``,
+        ``public_transport`` or ``highway`` is ``platform``) and the lift areas
+        (``highway=elevator``), with ``levels`` and a ``kind``: ``wall``, ``level``
+        (the outline of a floor), ``platform``, ``corridor``, ``shaft`` (stairwells,
+        lifts and technical rooms), ``toilets``, ``shop``, ``room``, or ``indoor``
+        for ``indoor=yes`` and ``indoor=no``.
     walls : GeoDataFrame
         The lines tagged ``indoor=wall``, with ``levels``.
     doors : GeoDataFrame
@@ -86,9 +105,7 @@ def read_indoor(osm):
     nodes, edges = osm.get_network(
         "walking", nodes=True, indoor_elements=True, walking_areas=True
     )
-    indoor = osm.get_data_by_custom_criteria(
-        {"indoor": True, "highway": ["elevator"]}, keep_nodes=False
-    )
+    indoor = osm.get_data_by_custom_criteria(_INDOOR_FILTER, keep_nodes=False)
     doors = osm.get_data_by_custom_criteria(
         {"door": True, "entrance": True}, keep_ways=False, keep_relations=False
     )
@@ -108,8 +125,9 @@ def read_indoor(osm):
     has_level = np.array([bool(tag_levels(row)) for row in poi_tags], dtype=bool)
     pois = _layer(pois, poi_tags, has_level, crs, kind=_poi_kind, levels=tag_levels)
     pois.geometry = pois.geometry.representative_point()
+    areas = _layer(indoor, tags, is_area, crs, kind=area_kind, levels=tag_levels)
     return IndoorElements(
-        areas=_layer(indoor, tags, is_area, crs, kind=area_kind, levels=tag_levels),
+        areas=_with_platform_levels(areas, edges),
         walls=_layer(indoor, tags, is_wall_line, crs, levels=tag_levels),
         doors=_layer(doors, row_tags(doors), is_door, crs, levels=tag_levels),
         pois=pois,
@@ -125,7 +143,7 @@ def area_kind(tags):
     indoor, room, amenity = (tags.get(key) for key in ("indoor", "room", "amenity"))
     if indoor in ("wall", "level"):
         return indoor
-    if "platform" in (tags.get("railway"), tags.get("public_transport")):
+    if is_platform(tags):
         return "platform"
     if indoor in ("corridor", "area") or room == "corridor":
         return "corridor"
@@ -136,6 +154,24 @@ def area_kind(tags):
     if _poi_kind(tags) == "shop":
         return "shop"
     return "indoor" if indoor in ("yes", "no") else "room"
+
+
+def _with_platform_levels(areas, edges):
+    """``areas`` with a level for each platform area that has none (no ``level`` tag,
+    or one that gives no level): the lowest level that pyrosm gave its lines among
+    ``edges`` (``u_level`` and ``v_level``); where these have none, the level of
+    :func:`pyrosm3d.tags.layer_level`."""
+    ends = (float_column(edges, "u_level"), float_column(edges, "v_level"))
+    on_lines = {}
+    for key, level in zip(element_keys(edges), np.fmin(*ends).tolist()):
+        if not np.isnan(level):
+            on_lines[key] = min(level, on_lines.get(key, level))
+    levels = areas["levels"].tolist()
+    columns = (element_keys(areas), areas["kind"], areas["tags"])
+    for row, (key, kind, tags) in enumerate(zip(*columns)):
+        if kind == "platform" and not levels[row]:
+            levels[row] = (on_lines.get(key, layer_level(tags)),)
+    return areas.assign(levels=levels)
 
 
 def _poi_kind(tags):
