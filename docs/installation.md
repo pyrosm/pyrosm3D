@@ -10,12 +10,12 @@ This also installs its dependencies: geopandas, numpy, pandas, plotly (5.15 or l
 
 ## pyrosm
 
-pyrosm reads the data that pyrosm3d draws. `read_indoor` needs a pyrosm that reads indoor elements (`get_network(..., indoor_elements=True)`). No pyrosm release has them yet, so install pyrosm from its main branch:
+pyrosm reads the data that pyrosm3d draws, and the views are reached through pyrosm: `osm.in3d` is a property of its `OSM` object. No pyrosm release has the property or the read of the indoor elements (`get_indoor_elements`) yet, so install pyrosm from its main branch:
 
 ```bash
 pip install "pyrosm @ git+https://github.com/pyrosm/pyrosm@main"
 ```
 
-The command builds pyrosm from source, which needs a C compiler. With a pyrosm that lacks the indoor reads, `read_indoor` raises a `TypeError` that names this command.
+The command builds pyrosm from source, which needs a C compiler.
 
-The drawing functions do not import pyrosm. `plot_network` takes GeoDataFrames or a graph, and `plot_indoor` and `to_html` take an `IndoorElements` object, whose layers are GeoDataFrames.
+The drawing functions do not import pyrosm. `plot_network` takes GeoDataFrames or a graph, and `plot_indoor` and `to_html` take an `IndoorElements` object, which `indoor_layers` makes of frames read with pyrosm.
