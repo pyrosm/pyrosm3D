@@ -130,8 +130,19 @@ def test_plot_indoor_draws_maunula_talo(maunula):
     assert _levels(traces, "Shops and amenities") == {0.0: 1, 1.0: 5, 2.0: 3}
     assert {door.visible for door in doors} == {"legendonly"}
     assert [set(door.z) for door in doors] == [{0.8}, {4.8}, {8.8}]
-    axis = figure.layout.scene.zaxis
-    assert (axis.tickvals, axis.ticktext) == ((0.0, 4.0, 8.0), ("0", "1", "2"))
+    scene = figure.layout.scene
+    assert (scene.zaxis.tickvals, scene.zaxis.ticktext) == (
+        (0.0, 4.0, 8.0),
+        ("0", "1", "2"),
+    )
+    eye = scene.camera.eye
+    assert eye.x > 0 > eye.y and eye.z > 0  # seen from the south-east and above
+    assert scene.dragmode == "turntable"
+    for axis in (scene.xaxis, scene.yaxis, scene.zaxis):
+        assert axis.showbackground is False and axis.gridcolor == "#d6dbe1"
+    assert scene.yaxis.title.text == "north (m)" and scene.yaxis.title.font.size == 11
+    assert scene.bgcolor == figure.layout.paper_bgcolor == "#ffffff"
+    assert figure.layout.hoverlabel.bgcolor == "#ffffff"
 
 
 def test_plot_indoor_draws_one_level(maunula):

@@ -30,9 +30,13 @@ from pyrosm3d.network import (
 )
 from pyrosm3d.styles import (
     AREA_STYLES,
+    AXIS_STYLE,
+    BACKGROUND_COLOUR,
+    CAMERA,
     COLUMN_STYLES,
     DOOR_STYLE,
     FLOOR_HEIGHT,
+    HOVER_LABEL,
     LEVEL_FLOOR_COLOUR,
     LEVEL_OUTLINE_COLOUR,
     OUTER_WALL_NAME,
@@ -434,7 +438,8 @@ def _layout(box, levels):
     """The layout of a figure of the view ``box`` (metres) whose traces are on
     ``levels`` (sorted): axes in metres from the middle of the box, the vertical axis
     from the lowest to the highest level and labelled with the whole levels, and the
-    heights stretched."""
+    heights stretched; a white scene without axis panes, seen from the south-east,
+    that turns about its vertical axis."""
     width, height = box[2] - box[0], box[3] - box[1]
     longest = max(width, height)
     whole = [shown for shown in levels if shown.is_integer()]
@@ -443,17 +448,27 @@ def _layout(box, levels):
     z_aspect = min(1.1, max(0.12, z_aspect))
     return dict(
         scene=dict(
-            xaxis=dict(title="east (m)", range=[-width / 2, width / 2]),
-            yaxis=dict(title="north (m)", range=[-height / 2, height / 2]),
+            xaxis=dict(
+                title_text="east (m)", range=[-width / 2, width / 2], **AXIS_STYLE
+            ),
+            yaxis=dict(
+                title_text="north (m)", range=[-height / 2, height / 2], **AXIS_STYLE
+            ),
             zaxis=dict(
-                title="level",
+                title_text="level",
                 range=z_range,
                 tickvals=[shown * FLOOR_HEIGHT for shown in whole],
                 ticktext=["%g" % shown for shown in whole],
+                **AXIS_STYLE,
             ),
             aspectmode="manual",
             aspectratio=dict(x=width / longest, y=height / longest, z=z_aspect),
+            camera=CAMERA,
+            dragmode="turntable",
+            bgcolor=BACKGROUND_COLOUR,
         ),
+        paper_bgcolor=BACKGROUND_COLOUR,
+        hoverlabel=HOVER_LABEL,
         legend=dict(itemclick="toggle"),
         margin=dict(l=0, r=0, t=30, b=0),
     )
