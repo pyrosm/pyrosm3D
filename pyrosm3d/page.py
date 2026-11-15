@@ -49,6 +49,8 @@ def to_html(indoor, path, title="Indoor elements", include_plotlyjs=True):
     figure.update_layout(legend_itemdoubleclick=False)
     views = level_views(figure)
     scene = figure.layout.scene
+    elements = _drawn_elements(indoor, figure)
+    notes = _element_notes(indoor)
     data = {
         "levels": [float(level) for level in views],
         "views": list(views.values()),
@@ -58,8 +60,8 @@ def to_html(indoor, path, title="Indoor elements", include_plotlyjs=True):
             "scene.zaxis.ticktext": list(scene.zaxis.ticktext),
             "scene.aspectratio": scene.aspectratio.to_plotly_json(),
         },
-        "elements": _drawn_elements(indoor, figure),
-        "about": _element_notes(indoor),
+        "elements": elements,
+        "about": {key: notes[key] for key in elements},
     }
     files = resources.files("pyrosm3d")
     plot = plotly.io.to_html(

@@ -108,6 +108,8 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     note = "room · level %g" % room["levels"][0]
     assert shown["tags"].startswith("Close | %s | %s | %s" % (hostile, note, key))
     assert shown["tagsAfterEmptyClick"] == shown["tags"]
+    data = json.loads(page.split('id="page-data">')[1].split("</script>")[0])
+    assert set(data["about"]) == set(data["elements"]) and key in data["about"]
     hint = "Click an area, a line or a marker to see its OpenStreetMap tags."
     assert shown["tagsAfterClose"] == hint
 
