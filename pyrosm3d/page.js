@@ -63,15 +63,16 @@
     });
   }
 
-  // A button that shows one level (null: all levels): a short label over the number
-  // of areas on the level, and the full name for a pointer and a screen reader
+  // A button that shows one level (null: all levels): a short label, over the number
+  // of areas on the level where a count is given, and the full name for a pointer and
+  // a screen reader
   function addButton(label, name, value, buttonView, count) {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = label;
     button.title = name;
     button.setAttribute("aria-label", name);
-    if (count) {
+    if (count !== null) {
       const areas = document.createElement("small");
       areas.textContent = String(count);
       button.appendChild(areas);
@@ -176,7 +177,7 @@
     saveCamera();
   }
 
-  addButton("All levels", "All levels", null, page.all, 0);
+  addButton("All levels", "All levels", null, page.all, null);
   page.levels.forEach((value, n) => {
     const count = page.counts[n];
     const areas = count === 1 ? "1 area" : count + " areas";
