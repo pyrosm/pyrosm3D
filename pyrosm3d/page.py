@@ -1,5 +1,6 @@
 """A web page of the indoor elements of a place: the figure of plot_indoor with a
-button for each level and a panel for the OpenStreetMap tags of a clicked element."""
+button for each level, a button for the legend and a panel for the OpenStreetMap tags
+of a clicked element."""
 
 import html
 import json
@@ -17,8 +18,10 @@ def to_html(indoor, path, title="Indoor elements", include_plotlyjs=True):
     """Write a web page with the 3D view of indoor elements.
 
     The page shows the figure of :func:`pyrosm3d.plot_indoor`. Its buttons show all
-    levels or one level, and a click on an area, a line of the network or a marker
-    shows the element's OpenStreetMap tags beside the figure.
+    levels or one level and show or hide the legend, and a click on an area, a line of
+    the network or a marker shows the element's OpenStreetMap tags beside the figure.
+    On a small screen, such as a phone's, the legend is hidden at start and the tags
+    lie over the figure. On a touch screen two fingers zoom and move the view.
 
     Parameters
     ----------

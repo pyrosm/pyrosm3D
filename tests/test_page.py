@@ -11,17 +11,19 @@ from pyrosm3d import plot_indoor, to_html
 from pyrosm3d.figure import level_views
 
 
-def _run_page(path, entry, clicked):
-    """What the page at ``path`` shows when each of its level buttons is pressed, the
-    legend ``entry`` is switched off and the first point of the trace ``clicked`` is
-    clicked: the JSON of ``page_harness.js``, which runs the page's scripts in node."""
+def _run_page(path, entry, clicked, size="wide"):
+    """What the page at ``path`` shows on a page of the ``size`` ("wide" or "small")
+    when its legend button and each of its level buttons are pressed, the legend
+    ``entry`` is switched off, the first point of the trace ``clicked`` is clicked,
+    the tags panel is closed and two fingers move on the view: the JSON of
+    ``page_harness.js``, which runs the page's scripts in node."""
     node = shutil.which("node")
     if node is None:
         if os.environ.get("CI"):
             pytest.fail("the page script is tested with node, which is not installed")
         pytest.skip("node is not installed")
     harness = Path(__file__).parent / "page_harness.js"
-    command = [node, str(harness), str(path), entry, clicked]
+    command = [node, str(harness), str(path), entry, clicked, size]
     done = subprocess.run(command, capture_output=True, text=True, check=True)
     return json.loads(done.stdout)
 
@@ -46,7 +48,14 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     or switched off as in the figure, list each legend entry once and set the vertical
     axis as plot_indoor does for the level. A click on a legend entry switches it off
     on every level, and a click on a room shows its tags with a link to the element;
-    a click on a point without an element leaves the panel as it is."""
+    a click on a point without an element leaves the panel as it is, and the panel's
+    button brings its first text back. The legend button hides and shows the legend;
+    on a small page the legend is hidden at start and lies over the view. Two fingers
+    on the view bring the camera closer as they spread and move it sideways with them;
+    plotly gets no move of theirs until every finger is lifted, and a third finger
+    moves nothing. Whenever the last finger is lifted from the plot the page writes the
+    camera to the layout, from which plotly sets the view when the plot changes or a
+    tool is picked; a finger elsewhere on the page does not count."""
     hostile = "</ScRiPt><script>alert(1)</script>"
     named = [{**tags, "name": hostile} for tags in maunula.areas["tags"]]
     maunula = replace(maunula, areas=maunula.areas.assign(tags=named))
@@ -59,7 +68,8 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     assert hostile not in page and page.lower().count("<script") == 2
     assert '"itemdoubleclick":false' in page
     plotted = page.index("Plotly.newPlot")
-    for used_by_the_script in ('id="levels"', 'id="page-data"', 'id="tags"'):
+    used = ('id="levels"', 'id="legend"', 'id="page-data"', 'id="tags"')
+    for used_by_the_script in used:
         assert page.index(used_by_the_script) < plotted
     online = to_html(maunula, tmp_path / "cdn.html", include_plotlyjs="cdn")
     assert "cdn.plot.ly" in online.read_text(encoding="utf-8")
@@ -93,5 +103,29 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     assert key.startswith("way ") and room["tags"]["indoor"] == "room"
     assert shown["link"] == "https://www.openstreetmap.org/way/%s" % key.split()[1]
     assert key in shown["tags"] and "indoor | room" in shown["tags"]
-    assert shown["tags"].startswith(hostile)
+    assert shown["tags"].startswith("Close | " + hostile)
     assert shown["tagsAfterEmptyClick"] == shown["tags"]
+    hint = "Click an area, a line or a marker to see its OpenStreetMap tags."
+    assert shown["tagsAfterClose"] == hint
+
+    assert shown["legendAtStart"] == {"pressed": "true", "layout": {"showlegend": True}}
+    assert shown["legendAfterClick"]["pressed"] == "false"
+    assert shown["legendAfterClick"]["layout"] == {"showlegend": False}
+    small = _run_page(path, "Rooms", "Rooms", size="small")
+    over_the_view = {"legend.x": 0, "legend.xanchor": "left"}
+    assert small["legendAtStart"]["pressed"] == "false"
+    assert small["legendAtStart"]["layout"].items() >= over_the_view.items()
+    assert small["legendAtStart"]["layout"]["showlegend"] is False
+    assert small["legendAfterClick"]["pressed"] == "true"
+    assert small["legendAfterClick"]["layout"].items() >= over_the_view.items()
+    assert small["legendAfterClick"]["layout"]["showlegend"] is True
+
+    # A finger on the plot with one on the header is plotly's. Two fingers from 100
+    # to 200 px apart: half the distance of 4, and 20 px down on a view 200 px high at
+    # the distance 2: 20 * 2 / 200. A third finger moves nothing; the two that stay
+    # start anew, and half as far apart around the same point double the distance.
+    touches = shown["touches"]
+    assert touches["kept"] == [False, True, True, True, True, True, False]
+    assert touches["distances"] == pytest.approx([4, 2, 2, 2, 4, 4, 4])
+    assert touches["pans"] == [[0, pytest.approx(0.2), 0], [0, 0, 0]]
+    assert touches["saves"] == [1, 1, 1, 2]
