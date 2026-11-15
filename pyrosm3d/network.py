@@ -37,6 +37,18 @@ _STYLES = {
     "crossing": ("Lines across areas", "#b8bcc4", 1.5, "solid"),
     "area": ("Area outlines", "#8a8f98", 2.5, "dot"),
 }
+# What one edge of each kind is called
+EDGE_NAMES = {
+    "street": "walkway",
+    "levels": "walkway",
+    "multi": "walkway",
+    "escalator": "escalator",
+    "moving_walkway": "moving walkway",
+    "stairs": "stairs",
+    "lift": "lift",
+    "platform": "platform",
+    "crossing": "line across an area",
+}
 # The route: red, wide and solid, drawn over the edges; the escalators are amber so that
 # they stay apart from it
 _ROUTE_COLOUR = "#e8002d"
@@ -130,15 +142,25 @@ def _edge_kinds(edges):
         yield row, edge_tags, kind, z_u, z_v
 
 
-def _edge_text(row, tags, kind):
-    """The hover text of an edge: its element, its ``highway`` value (else its
-    ``kind``) and its ``level`` tag."""
-    return "%s %s · %s<br>level %s" % (
+def _edge_text(row, tags, kind, level_u, level_v):
+    """The hover text of an edge: its name (else the legend's name of its ``kind``),
+    its element with its ``highway`` value (else its ``kind``), and the levels that
+    it is drawn at."""
+    return "%s<br>%s %s · %s<br>%s" % (
+        tags.get("name") or _STYLES[kind][0],
         getattr(row, "osm_type", "way"),
         getattr(row, "id", ""),
         tags.get("highway", kind),
-        tags.get("level", "not tagged"),
+        end_levels_text(level_u, level_v),
     )
+
+
+def end_levels_text(level_u, level_v):
+    """``"level 0"`` for a line on one level, ``"levels 0 → 1"`` for one that runs
+    from one level to another."""
+    if level_u == level_v:
+        return "level %g" % level_u
+    return "levels %g → %g" % (level_u, level_v)
 
 
 def _line_points(line, z_u, z_v, origin, vertical=False):
@@ -226,7 +248,7 @@ def plot_network(edges, nodes=None, center=None, radius=None, route=None, areas=
     traces = {kind: _Trace() for kind in _STYLES}
     for row, edge_tags, kind, z_u, z_v in _edge_kinds(metric):
         x, y, z = _line_points(row.geometry, z_u, z_v, origin, vertical=kind == "lift")
-        traces[kind].add(x, y, z, _edge_text(row, edge_tags, kind))
+        traces[kind].add(x, y, z, _edge_text(row, edge_tags, kind, z_u, z_v))
     ends = {
         (row.u, row.v): (row.geometry, z_u, z_v, kind == "lift")
         for row, _, kind, z_u, z_v in _edge_kinds(on_route)

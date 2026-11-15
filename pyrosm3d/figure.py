@@ -267,11 +267,12 @@ def _column_traces(indoor, origin):
     """The stairwells and the lift shafts of ``indoor`` as see-through columns, a
     trace for each of the two (see :func:`pyrosm3d.columns.shaft_columns`): walls
     along a column's outline from its lowest floor to wall height on its highest, and
-    a lid. A column passes through several levels, so its trace has no level."""
+    a lid, with the key of the column's largest room as ``customdata``. A column
+    passes through several levels, so its trace has no level."""
     traces = []
     for room, (name, colour, fallback) in COLUMN_STYLES.items():
-        corners, text, i, j, k = [], [], [], [], []
-        for outline, bottom, top, levels, names in shaft_columns(indoor, room):
+        corners, text, keys, i, j, k = [], [], [], [], [], []
+        for outline, bottom, top, levels, names, key in shaft_columns(indoor, room):
             z_low, z_high = bottom * FLOOR_HEIGHT, top * FLOOR_HEIGHT + WALL_HEIGHT
             ring = shapely.get_coordinates(outline.exterior)
             sides = wall_panels(ring, np.empty((0, 2)), z_low, z_high).reshape(-1, 3)
@@ -286,6 +287,7 @@ def _column_traces(indoor, origin):
             on_levels = ", ".join("%g" % level for level in levels)
             label = "%s<br>level %s" % (", ".join(names) or fallback, on_levels)
             text += [label] * (len(sides) + len(lid))
+            keys += [key] * (len(sides) + len(lid))
         if corners:
             xyz = np.concatenate(corners)
             traces.append(
@@ -304,6 +306,7 @@ def _column_traces(indoor, origin):
                     lighting=_FLAT_LIGHT,
                     hoverinfo="text",
                     hovertext=text,
+                    customdata=keys,
                     meta={"levels": []},
                 )
             )
@@ -370,7 +373,8 @@ def _network_traces(edges, origin, platform_floors=()):
         points = _line_points(row.geometry, z_u, z_v, origin, vertical=kind == "lift")
         ends = {float(level_u), float(level_v)}
         shown = sorted(ends | {float(math.floor(end + 0.5)) for end in ends})
-        lines[kind].add(shown, *points, _edge_text(row, tags, kind), key)
+        text = _edge_text(row, tags, kind, level_u, level_v)
+        lines[kind].add(shown, *points, text, key)
     traces = []
     for kind, (name, colour, width, dash) in _STYLES.items():
         traces += lines[kind].traces(name, colour, width, dash)

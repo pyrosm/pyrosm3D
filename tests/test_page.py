@@ -9,6 +9,7 @@ import pytest
 
 from pyrosm3d import plot_indoor, to_html
 from pyrosm3d.figure import level_views
+from pyrosm3d.page import _element_notes
 
 
 def _run_page(path, entry, clicked, size="wide"):
@@ -43,7 +44,8 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     """The page holds the figure of plot_indoor and loads plotly as asked; the elements
     that its script uses come before the script in the page, and a name that tries to
     end a script block stays text: it adds no script to the page and shows as it is
-    in the tags panel. A legend entry cannot be shown alone with a double click. A
+    in the tags panel, over what the element is and its level. A legend entry cannot
+    be shown alone with a double click. A
     button for all levels and one for each level show the traces of that level, drawn
     or switched off as in the figure, list each legend entry once and set the vertical
     axis as plot_indoor does for the level. A click on a legend entry switches it off
@@ -103,7 +105,8 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     assert key.startswith("way ") and room["tags"]["indoor"] == "room"
     assert shown["link"] == "https://www.openstreetmap.org/way/%s" % key.split()[1]
     assert key in shown["tags"] and "indoor | room" in shown["tags"]
-    assert shown["tags"].startswith("Close | " + hostile)
+    note = "room · level %g" % room["levels"][0]
+    assert shown["tags"].startswith("Close | %s | %s | %s" % (hostile, note, key))
     assert shown["tagsAfterEmptyClick"] == shown["tags"]
     hint = "Click an area, a line or a marker to see its OpenStreetMap tags."
     assert shown["tagsAfterClose"] == hint
@@ -129,3 +132,23 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     assert touches["distances"] == pytest.approx([4, 2, 2, 2, 4, 4, 4])
     assert touches["pans"] == [[0, pytest.approx(0.2), 0], [0, 0, 0]]
     assert touches["saves"] == [1, 1, 1, 2]
+
+
+def test_element_notes_of_maunula_talo(maunula):
+    """The note of an element says what it is and its levels: an area by its kind (a
+    platform area also for the edges of its outline), an edge of the network by its
+    kind and the levels of its ends, a door and a shop or amenity by their levels."""
+    notes = _element_notes(maunula)
+    assert notes["way 1568797319"] == "stairwell, lift or storage · levels 0, 1, 2"
+    assert notes["way 536922648"] == "platform area · level 0"
+    assert notes["way 1576010635"] == "wall · level 2"
+    assert notes["way 674689746"] == "stairs · level 0"
+    assert notes["way 26131689"] == "walkway · level 0"
+    doors = maunula.doors
+    on_first = doors[doors["levels"].map(lambda levels: levels == (1.0,))]
+    assert notes["node %d" % on_first["id"].iloc[0]] == "door or entrance · level 1"
+    unlevelled = doors[doors["levels"].map(len) == 0]
+    assert notes["node %d" % unlevelled["id"].iloc[0]] == "door or entrance · no level"
+    shop = maunula.pois[maunula.pois["kind"] == "shop"].iloc[0]
+    key = "%s %d" % (shop["osm_type"], shop["id"])
+    assert notes[key] == "shop or amenity · level %g" % shop["levels"][0]

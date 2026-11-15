@@ -4,7 +4,7 @@ import pytest
 from shapely.geometry import LineString, Point
 
 from pyrosm3d import plot_network
-from pyrosm3d.network import _STYLES, _edge_kind, _graph_frames
+from pyrosm3d.network import _STYLES, _edge_kind, _edge_text, _graph_frames
 
 
 def _traces(figure):
@@ -150,3 +150,37 @@ def test_plot_network_edge_kinds(tags, vertical, levels, crossing, expected):
     missing end level from the other end; a line across an area by its vertical value
     when it has one; a missing vertical value may be ``pd.NA``."""
     assert _edge_kind(tags, vertical, *levels, crossing) == expected
+
+
+@pytest.mark.parametrize(
+    "tags, kind, levels, expected",
+    [
+        (
+            {"name": "Asema", "highway": "footway"},
+            "levels",
+            (-1.0, -1.0),
+            "Asema<br>way 7 · footway<br>level -1",
+        ),
+        (
+            {"highway": "steps"},
+            "stairs",
+            (0.0, 1.5),
+            "Stairs<br>way 7 · steps<br>levels 0 → 1.5",
+        ),
+        (
+            {},
+            "crossing",
+            (2.0, 2.0),
+            "Lines across areas<br>way 7 · crossing<br>level 2",
+        ),
+    ],
+)
+def test_plot_network_edge_text(tags, kind, levels, expected):
+    """The hover text of an edge names it (its name, else the legend entry of its
+    kind), its element with its highway value (else its kind) and the levels it is
+    drawn at: one level, or the levels of its two ends."""
+
+    class Row:
+        id = 7
+
+    assert _edge_text(Row, tags, kind, *levels) == expected

@@ -113,6 +113,9 @@ def test_plot_indoor_draws_maunula_talo(maunula):
         (4.0, 9.6),
         (0.0, 9.6),
     ]
+    assert set(columns[1].customdata) == {"way 1568797319"}
+    stairs = next(trace for trace in traces if trace.name == "Stairs")
+    assert stairs.text[0] == "Stairs<br>way 674689746 · steps<br>level 0"
     outlines = [trace for trace in traces if trace.name == "Level outlines"]
     assert [outline.meta["levels"] for outline in outlines] == [[0.0], [1.0], [2.0]]
     assert {z for z in outlines[2].z if z is not None} == {8.1}

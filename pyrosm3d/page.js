@@ -90,6 +90,8 @@
     close.addEventListener("click", () => panel.replaceChildren(...hint));
     const heading = document.createElement("h2");
     heading.textContent = tags.name || tags.ref || key;
+    const note = document.createElement("p");
+    note.textContent = page.about[key] || "";
     const link = document.createElement("a");
     link.href = "https://www.openstreetmap.org/" + type + "/" + id;
     link.textContent = key;
@@ -104,7 +106,7 @@
       row.appendChild(cell);
       table.appendChild(row);
     });
-    panel.replaceChildren(close, heading, link, table);
+    panel.replaceChildren(close, heading, note, link, table);
   }
 
   // Which two touches these are, how far apart (a pixel at least), and the point

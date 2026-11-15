@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import shapely
 
-from pyrosm3d.tags import float_column
+from pyrosm3d.tags import element_keys, float_column
 
 # The ``vertical`` value of the edges that run inside each kind of column
 _CLIMBS = {"stairs": "stairs", "elevator": "lift"}
@@ -19,30 +19,31 @@ def shaft_columns(indoor, room):
 
     The rooms of the kind that lie over each other on consecutive floors, or with one
     floor missing between them, form one column (see :func:`_stacks`). Returns a list
-    of ``(outline, bottom, top, levels, names)``: the outline of the stack's largest
-    room, the levels of the lowest and highest floor the column reaches, the whole
-    levels of its rooms, and the names or refs of the rooms. Stairs or lift edges of
+    of ``(outline, bottom, top, levels, names, key)``: the outline of the stack's
+    largest room, the levels of the lowest and highest floor the column reaches, the
+    whole levels of its rooms, the names or refs of the rooms, and the key of the
+    largest room (see :func:`pyrosm3d.tags.element_keys`). Stairs or lift edges of
     the network inside the outline stretch the column to the levels they reach."""
     areas = indoor.areas
     rooms = []
     columns = (areas["kind"], areas["levels"], areas["tags"], areas.geometry)
-    for kind, levels, tags, polygon in zip(*columns):
+    for key, kind, levels, tags, polygon in zip(element_keys(areas), *columns):
         is_room = tags.get("room") == room
         is_lift = room == "elevator" and tags.get("highway") == "elevator"
         whole = [level for level in levels if float(level).is_integer()]
         if kind == "shaft" and (is_room or is_lift) and whole:
-            rooms.append((_outline(polygon), whole, tags))
+            rooms.append((_outline(polygon), whole, tags, key))
     climb_xy, climb_levels = _climbs(indoor.edges, _CLIMBS[room])
     found = []
     for stack in _stacks(rooms):
-        outline = max((outline for outline, _, _ in stack), key=lambda o: o.area)
-        levels = sorted({level for _, whole, _ in stack for level in whole})
+        outline, _, _, key = max(stack, key=lambda entry: entry[0].area)
+        levels = sorted({level for _, whole, _, _ in stack for level in whole})
         inside = shapely.contains_xy(outline, climb_xy[:, 0], climb_xy[:, 1])
         reached = np.r_[levels, climb_levels[inside].ravel()]
-        names = [tags.get("name") or tags.get("ref") for _, _, tags in stack]
+        names = [tags.get("name") or tags.get("ref") for _, _, tags, _ in stack]
         names = list(dict.fromkeys(name for name in names if name))
         bottom, top = math.floor(reached.min()), math.ceil(reached.max())
-        found.append((outline, bottom, top, levels, names))
+        found.append((outline, bottom, top, levels, names, key))
     return found
 
 
@@ -66,13 +67,13 @@ def _climbs(edges, vertical):
 
 
 def _stacks(rooms):
-    """The ``rooms`` (``(outline, whole levels, tags)``) grouped into stacks. A room
-    joins a room one or two levels above its highest level when the middle of the
+    """The ``rooms`` (``(outline, whole levels, tags, key)``) grouped into stacks. A
+    room joins a room one or two levels above its highest level when the middle of the
     outline of one lies inside the outline of the other. Rooms with different room
     numbers (see :func:`_room_number`) never share a stack."""
     parent = list(range(len(rooms)))
-    numbers = [{_room_number(tags)} - {None} for _, _, tags in rooms]
-    rings = [shapely.get_coordinates(outline.exterior) for outline, _, _ in rooms]
+    numbers = [{_room_number(tags)} - {None} for _, _, tags, _ in rooms]
+    rings = [shapely.get_coordinates(room[0].exterior) for room in rooms]
     middles = [ring.mean(axis=0) for ring in rings]
 
     def root(room):
@@ -85,9 +86,9 @@ def _stacks(rooms):
             shapely.contains_xy(rooms[one][0], *middles[other])
         )
 
-    for below, (_, levels, _) in enumerate(rooms):
+    for below, (_, levels, _, _) in enumerate(rooms):
         over = levels[-1] + 1
-        for above, (_, upper, _) in enumerate(rooms):
+        for above, (_, upper, _, _) in enumerate(rooms):
             if (over in upper or over + 1 in upper) and overlap(below, above):
                 a, b = root(below), root(above)
                 if a != b and len(numbers[a] | numbers[b]) <= 1:

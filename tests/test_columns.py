@@ -12,8 +12,9 @@ def _with_shafts(indoor, rooms, climbs=()):
     its areas and the ``climbs`` (``(vertical, u_level, v_level, line)``) as its
     edges."""
     levels, tags, polygons = zip(*rooms)
+    ids = range(1, len(rooms) + 1)
     areas = GeoDataFrame(
-        {"kind": "shaft", "levels": list(levels), "tags": list(tags)},
+        {"id": ids, "kind": "shaft", "levels": list(levels), "tags": list(tags)},
         geometry=list(polygons),
         crs=indoor.areas.crs,
     )
@@ -28,17 +29,20 @@ def _with_shafts(indoor, rooms, climbs=()):
 
 def _summary(columns):
     """``(area of the outline, bottom, top, levels, names)`` of each column."""
-    return [(round(c[0].area, 1), *c[1:]) for c in columns]
+    return [(round(c[0].area, 1), *c[1:5]) for c in columns]
 
 
 def test_shaft_columns_of_maunula_talo(maunula):
     """The lift of Maunula-talo is one room through three floors, and each of its two
-    stairwells one room through two: three columns."""
-    assert _summary(shaft_columns(maunula, "elevator")) == [
-        (7.1, 0, 2, [0.0, 1.0, 2.0], [])
-    ]
+    stairwells one room through two: three columns, each with the key of its room."""
+    lifts = shaft_columns(maunula, "elevator")
+    assert _summary(lifts) == [(7.1, 0, 2, [0.0, 1.0, 2.0], [])]
+    assert [column[5] for column in lifts] == ["way 1568797319"]
     stairs = shaft_columns(maunula, "stairs")
-    assert [column[1:] for column in stairs] == [(1, 2, [1.0, 2.0], [])] * 2
+    assert [column[1:5] for column in stairs] == [(1, 2, [1.0, 2.0], [])] * 2
+    areas = maunula.areas
+    stairwells = areas[[tags.get("room") == "stairs" for tags in areas["tags"]]]
+    assert [column[5] for column in stairs] == ["way %d" % i for i in stairwells["id"]]
 
 
 def test_shaft_columns_stack_rooms_over_each_other(maunula):
@@ -83,7 +87,7 @@ def test_shaft_columns_keep_numbered_lifts_apart(maunula):
         ((0.5,), {"room": "elevator"}, shaft),
     ]
     columns = shaft_columns(_with_shafts(maunula, rooms), "elevator")
-    assert [column[1:] for column in columns] == [
+    assert [column[1:5] for column in columns] == [
         (0, 3, [0.0, 1.0, 3.0], ["AA 00 35", "AA 01 35"]),
         (2, 2, [2.0], ["AA 02 37"]),
     ]
