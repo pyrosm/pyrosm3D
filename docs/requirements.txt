@@ -1,0 +1,6 @@
+# The Sphinx toolchain of the documentation. Read the Docs installs pyrosm3d itself
+# (see .readthedocs.yml), which brings its dependencies. The notebooks are shown with
+# their stored outputs, so pyrosm is not needed for the build.
+myst-nb>=1.0,<2.0
+sphinx>=7.0,<9.0
+sphinx-book-theme==1.2.0

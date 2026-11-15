@@ -25,7 +25,13 @@ classifiers = [
     "Topic :: Scientific/Engineering :: GIS",
     "Topic :: Scientific/Engineering :: Visualization",
 ]
-dependencies = []
+dependencies = [
+    "geopandas>=0.12.0",
+    "numpy",
+    "pandas",
+    "plotly>=5.15",
+    "shapely>=2.1",
+]
 
 [project.urls]
 Repository = "https://github.com/pyrosm/pyrosm3D"
@@ -33,6 +39,9 @@ Repository = "https://github.com/pyrosm/pyrosm3D"
 
 [tool.setuptools.packages.find]
 include = ["pyrosm3d*"]
+
+[tool.setuptools.package-data]
+pyrosm3d = ["page.html", "page.js"]
 
 [tool.black]
 target-version = ["py311", "py312", "py313", "py314"]
