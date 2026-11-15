@@ -149,7 +149,8 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     # A finger on the plot with one on the header is plotly's. Two fingers from 100
     # to 200 px apart: half the distance of 4, and 20 px down on a view 200 px high at
     # the distance 2: 20 * 2 / 200. A third finger moves nothing; the two that stay
-    # start anew, and half as far apart around the same point double the distance.
+    # start anew, and half as far apart around the same point double the distance,
+    # also when the browser lists the two in the other order.
     touches = shown["touches"]
     assert touches["kept"] == [False, True, True, True, True, True, False]
     assert touches["distances"] == pytest.approx([4, 2, 2, 2, 4, 4, 4])

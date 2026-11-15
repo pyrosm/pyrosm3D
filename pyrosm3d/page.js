@@ -119,13 +119,13 @@
     panel.replaceChildren(close, heading, note, link, table);
   }
 
-  // Which two touches these are, how far apart (a pixel at least), and the point
-  // between them
+  // Which two touches these are (the same in either order: a list of touches has no
+  // fixed order), how far apart (a pixel at least), and the point between them
   function fingers(touches) {
     const [first, second] = [touches[0], touches[1]];
     const apart = Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY);
     return {
-      pair: first.identifier + " " + second.identifier,
+      pair: [first.identifier, second.identifier].sort((a, b) => a - b).join(" "),
       apart: Math.max(apart, 1),
       x: (first.clientX + second.clientX) / 2,
       y: (first.clientY + second.clientY) / 2,
