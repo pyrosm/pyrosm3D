@@ -93,7 +93,7 @@ def plot_indoor(indoor, level=None):
         + _wall_traces(outer, OUTER_WALL_NAME, origin, hidden=True)
         + _level_floor_traces(level_floors, origin)
         + _column_traces(indoor, origin)
-        + _network_traces(indoor.edges, origin)
+        + _network_traces(indoor.edges, origin, _platform_floors(indoor.areas, view))
         + _marker_traces(indoor.doors, DOOR_STYLE, WALL_HEIGHT / 2, origin)
         + _marker_traces(indoor.pois, POI_STYLE, _POI_LIFT, origin)
     )
@@ -326,14 +326,26 @@ def _outline_traces(areas, origin, view):
     return [trace.update(hoverinfo="skip", hovertemplate=None) for trace in traces]
 
 
-def _network_traces(edges, origin):
+def _platform_floors(areas, view):
+    """The keys of the platform areas among ``areas`` that have a floor in the box
+    ``view`` (see :func:`pyrosm3d.tags.element_keys`)."""
+    platforms = areas[(areas["kind"] == "platform") & areas.intersects(view)]
+    columns = (element_keys(platforms), platforms["levels"])
+    return {key for key, levels in zip(*columns) if floor_levels("platform", levels)}
+
+
+def _network_traces(edges, origin, platform_floors=()):
     """The ``edges`` of the walking network as lines, one trace for each kind of edge
     (see :func:`pyrosm3d.plot_network`) and each set of levels an edge is shown on:
     the levels at its two ends, and for a level between two floors the nearest
-    floor."""
+    floor. The platform edges of the elements among ``platform_floors`` (keys, see
+    :func:`_platform_floors`) are left out: the outline of a platform mapped as a
+    closed way is an edge, and its floor is drawn with an outline already."""
     lines = {kind: _LevelLines() for kind in _STYLES}
     kinds = zip(element_keys(edges), _edge_kinds(edges))
     for key, (row, tags, kind, level_u, level_v) in kinds:
+        if kind == "platform" and key in platform_floors:
+            continue
         z_u, z_v = (lv * FLOOR_HEIGHT + _NETWORK_LIFT for lv in (level_u, level_v))
         points = _line_points(row.geometry, z_u, z_v, origin, vertical=kind == "lift")
         ends = {float(level_u), float(level_v)}

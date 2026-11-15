@@ -7,7 +7,7 @@ from shapely.geometry import box
 from pyrosm3d import plot_indoor
 from pyrosm3d.floors import floor_levels, floor_openings
 from pyrosm3d.styles import AREA_STYLES, VIEW_MARGIN
-from pyrosm3d.tags import element_keys
+from pyrosm3d.tags import crosses_area, element_keys
 
 
 def _floor_area(trace):
@@ -93,7 +93,7 @@ def test_plot_indoor_draws_maunula_talo(maunula):
     )
     assert sum(map(_line_length, outlines)) == pytest.approx(expected, abs=1.0)
     assert set(_levels(traces, "Lines across areas")) == {0.0, 1.0, 2.0}
-    assert set(_levels(traces, "Platforms")) == {0.0}
+    assert "Platforms" not in {trace.name for trace in traces}
 
     listed = [trace.legendgroup for trace in traces if trace.showlegend]
     assert listed == list(dict.fromkeys(trace.legendgroup for trace in traces))
@@ -177,6 +177,23 @@ def test_plot_indoor_opens_floors_for_stairs(maunula):
     closed = second_floor(plot_indoor(maunula))
     opened = second_floor(plot_indoor(replace(maunula, edges=edges)))
     assert closed - opened == pytest.approx(taken, rel=0.01)
+
+
+def test_plot_indoor_draws_platform_lines_without_a_floor(maunula):
+    """The outline of a platform mapped as a closed way is an edge of the network.
+    Where the platform has a floor, with an outline of its own, the edge is not drawn
+    as a "Platforms" line; without the floor it is, where it reaches the view."""
+    areas, edges = maunula.areas, maunula.edges
+    no_floors = replace(maunula, areas=areas[areas["kind"] != "platform"])
+    lines = [t for t in plot_indoor(no_floors).data if t.name == "Platforms"]
+    assert [line.meta["levels"] for line in lines] == [[0.0]]
+    platforms = set(element_keys(areas[areas["kind"] == "platform"]))
+    of_platform = np.array([key in platforms for key in element_keys(edges)])
+    outlines = edges[of_platform & ~crosses_area(edges)]
+    assert len(outlines) == 27
+    in_view = outlines[outlines.intersects(_view(no_floors.areas))]
+    assert _line_length(lines[0]) == pytest.approx(in_view.length.sum(), abs=0.5)
+    assert "Platforms" not in {trace.name for trace in plot_indoor(maunula).data}
 
 
 def test_plot_indoor_view_follows_the_other_areas(maunula):
