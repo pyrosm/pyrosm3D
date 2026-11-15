@@ -151,11 +151,13 @@ def _view_box(indoor):
 
 
 def areas_in_view(indoor):
-    """The areas of ``indoor`` (an IndoorLayers) that reach into the view of its
-    figure (see :func:`_view_box`). A walking area that lies outside the view of the
-    other areas has no floor and no outline in the figure."""
+    """The areas of ``indoor`` (an IndoorLayers) that the figure draws a part of: those
+    with a part inside its view (see :func:`_view_box`, :func:`_inside`). A walking
+    area that lies outside the view of the other areas, or only touches it, has no
+    floor and no outline in the figure."""
     view = shapely.box(*_view_box(indoor))
-    return indoor.areas[indoor.areas.intersects(view)]
+    in_view = [bool(_inside(shape, view)) for shape in indoor.areas.geometry]
+    return indoor.areas[in_view]
 
 
 def _inside(shape, view):
