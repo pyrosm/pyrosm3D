@@ -20,6 +20,9 @@ dependencies:
   # optional
   - networkx
   - python-igraph
+  - rasterio
   # testing
   - pytest
   - pytest-cov
+  - pip:
+      - cafein.sampledata==2026.8.4
