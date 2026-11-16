@@ -35,6 +35,25 @@ pyrosm does the reading, and pyrosm3d the drawing. The views of `osm.in3d` read 
 
 Frames that you have read or changed yourself are drawn with the functions of the package, which take pyrosm's frames: `pyrosm3d.plot_indoor(elements, edges, nodes, buildings)`, `pyrosm3d.to_html(elements, path, edges, nodes, buildings)` and `pyrosm3d.plot_network(edges, nodes)`.
 
+## Heights in metres
+
+OpenStreetMap levels are counted from each building's own ground floor, so on a slope the levels of two buildings do not meet. With a terrain model, pyrosm3d places the walking network at heights in metres: streets lie on the terrain, and floors are placed from the streets that they meet.
+
+```python
+dem = "elevation.tif"                          # a raster of ground heights that you supply
+
+nodes, edges = osm.in3d.get_network(dem=dem)   # the edges with u_height and v_height
+osm.in3d.plot_network(dem=dem).show()          # the network drawn in metres
+```
+
+`dem` takes a raster file such as a GeoTIFF, a list of tiles, or a function `(longitudes, latitudes) -> heights`. pyrosm3d bundles and downloads no terrain data. Reading a raster file needs rasterio, which the `dem` extra installs:
+
+```bash
+pip install "pyrosm3d[dem] @ git+https://github.com/pyrosm/pyrosm3D@main"
+```
+
+OpenStreetMap holds no depths: a floor that meets no street, such as a metro platform, is placed 4 m per level from the floors that it is joined to, not at its real depth. `pyrosm3d.network_heights(edges, dem)` gives the heights to edges that you have read yourself.
+
 ## Documentation
 
 The pages under [docs/](docs/) show the functions on a real building and list their parameters.

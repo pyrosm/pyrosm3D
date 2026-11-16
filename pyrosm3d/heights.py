@@ -17,15 +17,15 @@ several levels) holds its ends together, so a bridge or a tunnel runs straight b
 the streets at its ends. Each of these wishes counts in inverse proportion to the length
 of its edge, those of the edges on one level three times, and the heights with the
 smallest squared misses are taken. What nothing ties to a street is placed by its
-levels alone, that many metres for each level from the ground at its place.
+levels alone, a floor height for each level from the ground at its place.
 
 Where the terrain model has no height, a street's end and what is placed there have
 none (NaN).
 
 OpenStreetMap holds no depths: a floor that meets no street, such as a metro platform,
-lies a whole number of floor heights from the floors above it, not at its real depth.
-A terrain model shows the ground without what is built on it: a street on a deck or
-in a courtyard above a slope follows the modelled ground under it.
+is placed a floor height per level from the floors that it is joined to, not at its
+real depth. A terrain model shows the ground without what is built on it: a street on a
+deck or in a courtyard above a slope follows the modelled ground under it.
 """
 
 import math

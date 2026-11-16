@@ -8,6 +8,16 @@ pip install "pyrosm3d @ git+https://github.com/pyrosm/pyrosm3D@main"
 
 This also installs its dependencies: geopandas, numpy, pandas, plotly (5.15 or later) and shapely (2.1 or later). Python 3.11 or later is needed.
 
+## Terrain models
+
+The heights in metres need a terrain model that you supply. Reading one from a raster file, such as a GeoTIFF, needs rasterio, which the `dem` extra installs:
+
+```bash
+pip install "pyrosm3d[dem] @ git+https://github.com/pyrosm/pyrosm3D@main"
+```
+
+A function that returns the heights of coordinates needs no extra.
+
 ## pyrosm
 
 pyrosm reads the data that pyrosm3d draws, and the views are reached through pyrosm: `osm.in3d` is a property of its `OSM` object. No pyrosm release has the property or the read of the indoor elements (`get_indoor_elements`) yet, so install pyrosm from its main branch:
