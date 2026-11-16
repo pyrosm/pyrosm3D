@@ -7,6 +7,9 @@ that hides or shows it.
 A walkway tagged with several levels is drawn flat at the lowest, dotted; an edge
 without a level at its layer when that is below street level (a tunnel at least one
 below), else at street level. The vertical axis counts OSM levels, not metres.
+
+With a terrain model the edges are drawn at heights in metres instead, those of
+:func:`pyrosm3d.heights.network_heights`.
 """
 
 import numpy as np
@@ -15,6 +18,7 @@ import plotly.graph_objects as go
 import shapely
 from geopandas import GeoDataFrame
 
+from pyrosm3d.dem import sample_dem
 from pyrosm3d.tags import (
     crosses_area,
     float_column,
@@ -176,22 +180,50 @@ def _line_points(line, z_u, z_v, origin, vertical=False):
     return xy[:, 0] - origin[0], xy[:, 1] - origin[1], z
 
 
+def _line_heights(line, origin, vertical=False):
+    """x, y (metres from ``origin``) and z of the points of ``line``, a line with a
+    height in metres at every vertex (see :func:`pyrosm3d.heights.network_heights`); a
+    vertical line at its first point when ``vertical`` or when it has no length, as a
+    lift."""
+    points = shapely.get_coordinates(line, include_z=True)
+    if vertical or shapely.length(line) == 0:
+        points = points[[0, -1]]
+        points[1, :2] = points[0, :2]
+    return points[:, 0] - origin[0], points[:, 1] - origin[1], points[:, 2]
+
+
+def _edge_points(line, kind, z_u, z_v, origin, in_metres):
+    """x, y (metres from ``origin``) and z of the points of the ``line`` of an edge of
+    the ``kind``, a lift a vertical line: its own heights when ``in_metres`` (see
+    :func:`_line_heights`), else its levels from ``z_u`` to ``z_v`` (see
+    :func:`_line_points`)."""
+    if in_metres:
+        return _line_heights(line, origin, vertical=kind == "lift")
+    return _line_points(line, z_u, z_v, origin, vertical=kind == "lift")
+
+
 class _Trace:
     """The points of one legend entry, lines separated by gaps."""
 
     def __init__(self):
         self.x, self.y, self.z, self.text = [], [], [], []
 
-    def add(self, x, y, z, text):
+    def add(self, x, y, z, text, in_metres=False):
         """Add one line through the points ``x``, ``y``, ``z`` (rounded to hundredths),
-        labelled ``text``."""
+        labelled ``text``, and with the height of each point when ``z`` is
+        ``in_metres``."""
         self.x += np.round(x, 2).tolist() + [None]
         self.y += np.round(y, 2).tolist() + [None]
         self.z += np.round(z, 2).tolist() + [None]
-        self.text += [text] * len(x) + [None]
+        if in_metres:
+            self.text += ["%s<br>%.1f m" % (text, height) for height in z] + [None]
+        else:
+            self.text += [text] * len(x) + [None]
 
 
-def plot_network(edges, nodes=None, center=None, radius=None, route=None, areas=None):
+def plot_network(
+    edges, nodes=None, center=None, radius=None, route=None, areas=None, dem=None
+):
     """A plotly Figure of an indoor network in 3D (see the module docstring).
 
     Parameters
@@ -215,7 +247,18 @@ def plot_network(edges, nodes=None, center=None, radius=None, route=None, areas=
         legend hides it.
     areas : GeoDataFrame (optional)
         Polygons, such as platform areas or squares, drawn as outlines at their
-        ``level`` (street level without one); lines are drawn as they are.
+        ``level`` (street level without one); lines are drawn as they are. Areas have
+        no heights in metres, so they cannot be given with ``dem``.
+    dem : str or pathlib.Path, a sequence of them, or a function (optional)
+        A terrain model: a raster file of heights such as a GeoTIFF (reading one needs
+        ``pip install "pyrosm3d[dem]"``), several tiles of one, or a function
+        ``(longitudes, latitudes) -> heights``. The network is then drawn at heights in
+        metres (see :func:`pyrosm3d.heights.network_heights`): streets on the terrain,
+        floors placed from the streets that they meet, an entrance at the height of
+        an edge drawn on its level at its node, else on the ground. The hover texts
+        give the height
+        of each point, and an edge with a vertex where the terrain model has no
+        height is left out. The edges need the columns ``u`` and ``v``.
 
     Returns
     -------
@@ -225,11 +268,26 @@ def plot_network(edges, nodes=None, center=None, radius=None, route=None, areas=
     """
     if radius is not None and not radius >= 0:
         raise ValueError("radius must be at least 0 metres, not %r." % (radius,))
+    in_metres = dem is not None
+    if in_metres and areas is not None:
+        raise ValueError(
+            "plot_network draws areas at their levels, not at heights in metres: "
+            "give areas or dem, not both."
+        )
     if not isinstance(edges, GeoDataFrame):
         edges, graph_nodes = _graph_frames(edges)
         nodes = graph_nodes if nodes is None else nodes
     if edges.empty:
         raise ValueError("plot_network got no edges to draw.")
+    if in_metres:
+        from pyrosm3d.heights import network_heights  # it imports this module
+
+        edges = network_heights(edges, dem)
+        edges = edges[shapely.has_z(edges.geometry.to_numpy())]
+        if edges.empty:
+            raise ValueError(
+                "plot_network found no heights for the edges in the terrain model."
+            )
     crs = edges.estimate_utm_crs()
     metric = edges.to_crs(crs)
     if center is None:
@@ -247,10 +305,11 @@ def plot_network(edges, nodes=None, center=None, radius=None, route=None, areas=
         metric = metric[metric.distance(middle) <= radius]
     traces = {kind: _Trace() for kind in _STYLES}
     for row, edge_tags, kind, z_u, z_v in _edge_kinds(metric):
-        x, y, z = _line_points(row.geometry, z_u, z_v, origin, vertical=kind == "lift")
-        traces[kind].add(x, y, z, _edge_text(row, edge_tags, kind, z_u, z_v))
+        points = _edge_points(row.geometry, kind, z_u, z_v, origin, in_metres)
+        text = _edge_text(row, edge_tags, kind, z_u, z_v)
+        traces[kind].add(*points, text, in_metres)
     ends = {
-        (row.u, row.v): (row.geometry, z_u, z_v, kind == "lift")
+        (row.u, row.v): _edge_points(row.geometry, kind, z_u, z_v, origin, in_metres)
         for row, _, kind, z_u, z_v in _edge_kinds(on_route)
     }
     figure = go.Figure()
@@ -260,16 +319,22 @@ def plot_network(edges, nodes=None, center=None, radius=None, route=None, areas=
         if traces[kind].x:
             figure.add_trace(_lines(traces[kind], name, colour, width, dash))
     if route is not None:
-        _add_route(figure, route, ends, origin)
+        _add_route(figure, route, ends, in_metres)
     if nodes is not None:
-        _add_entrances(figure, nodes.to_crs(crs), middle, radius)
+        entrances, heights = _entrances(nodes)
+        if in_metres:
+            heights = _entrance_heights(entrances, heights, edges, dem)
+        _add_entrances(
+            figure, entrances.to_crs(crs), heights, middle, radius, in_metres
+        )
     figure.update_layout(
         scene=dict(
             xaxis_title="east (m)",
             yaxis_title="north (m)",
-            zaxis_title="level",
+            zaxis_title="height (m)" if in_metres else "level",
             aspectmode="manual",
-            aspectratio=dict(x=1, y=1, z=0.5),
+            # heights in metres are drawn flatter: streets slope
+            aspectratio=dict(x=1, y=1, z=0.25 if in_metres else 0.5),
         ),
         legend=dict(itemclick="toggle"),
         margin=dict(l=0, r=0, t=30, b=0),
@@ -277,20 +342,20 @@ def plot_network(edges, nodes=None, center=None, radius=None, route=None, areas=
     return figure
 
 
-def _add_route(figure, route, ends, origin):
+def _add_route(figure, route, ends, in_metres):
     """Add the ``route`` (node ids) as a line along the edges between consecutive nodes,
-    either way (``ends``: ``{(u, v): (line, z at u, z at v, lift)}``), with markers at
-    its first and last point; steps without an edge are left out."""
+    either way (``ends``: ``{(u, v): (x, y, z)}``, the points of each edge as drawn,
+    z ``in_metres`` or in levels), with markers at its first and last point; steps
+    without an edge are left out."""
     line_trace = _Trace()
     for a, b in zip(route[:-1], route[1:]):
         if (a, b) in ends:
-            line, z_a, z_b, lift = ends[(a, b)]
+            points = ends[(a, b)]
         elif (b, a) in ends:
-            line, z_b, z_a, lift = ends[(b, a)]
-            line = line.reverse()
+            points = [values[::-1] for values in ends[(b, a)]]
         else:
             continue
-        line_trace.add(*_line_points(line, z_a, z_b, origin, vertical=lift), "route")
+        line_trace.add(*points, "route", in_metres)
     if not line_trace.x:
         return
     figure.add_trace(_lines(line_trace, "Route", _ROUTE_COLOUR, 10.0, "solid"))
@@ -354,21 +419,52 @@ def _add_area_outlines(trace, areas, middle, radius):
                 trace.add(*points, "area, level %g" % z)
 
 
-def _add_entrances(figure, nodes, middle, radius):
-    """Add the station entrances among ``nodes`` (in metres) within ``radius`` of
-    ``middle`` as markers."""
+def _entrances(nodes):
+    """``(entrances, levels)``: the station entrances among ``nodes`` (``railway``
+    tagged ``subway_entrance`` or ``train_station_entrance``), and for each the lowest
+    level of its ``level`` tag (street level, 0, without one)."""
+    rows, levels = [], []
+    for row, tags in enumerate(row_tags(nodes)):
+        if tags.get("railway") in _ENTRANCES:
+            ranges = level_ranges(tags.get("level"))
+            rows.append(row)
+            levels.append(min(r[0] for r in ranges) if ranges else 0.0)
+    return nodes.iloc[rows], levels
+
+
+def _entrance_heights(entrances, levels, edges, dem):
+    """The heights in metres of the station ``entrances`` on their ``levels``: that
+    of an end of ``edges`` (with the heights of
+    :func:`pyrosm3d.heights.network_heights`) at the node, of an edge drawn on that
+    level there (see :func:`_edge_kind`), else the ground's height at the node in the
+    terrain model ``dem``."""
+    points = entrances.geometry.to_crs(4326)
+    ground = sample_dem(points.x.to_numpy(), points.y.to_numpy(), dem)
+    ids = entrances["id"]
+    on_level = {}
+    for row, _, _, z_u, z_v in _edge_kinds(
+        edges[edges["u"].isin(ids) | edges["v"].isin(ids)]
+    ):
+        on_level[(row.u, z_u)] = row.u_height
+        on_level[(row.v, z_v)] = row.v_height
+    places = zip(ids.tolist(), levels)
+    return [on_level.get(place, here) for place, here in zip(places, ground.tolist())]
+
+
+def _add_entrances(figure, entrances, heights, middle, radius, in_metres=False):
+    """Add the station ``entrances`` (in metres) within ``radius`` of ``middle`` as
+    markers at their ``heights``, levels or metres (``in_metres``: the hover text
+    gives them, and an entrance without a height is left out)."""
     x, y, z, text = [], [], [], []
-    for tags, row in zip(row_tags(nodes), nodes.itertuples()):
-        if tags.get("railway") not in _ENTRANCES:
-            continue
+    for row, height in zip(entrances.itertuples(), heights):
         point = row.geometry
-        if not _near(point, middle, radius):
+        if not _near(point, middle, radius) or np.isnan(height):
             continue
-        ranges = level_ranges(tags.get("level"))
         x.append(point.x - middle.x)
         y.append(point.y - middle.y)
-        z.append(min(r[0] for r in ranges) if ranges else 0.0)
-        text.append("entrance %s" % row.id)
+        z.append(height)
+        metres = "<br>%.1f m" % height if in_metres else ""
+        text.append("entrance %s%s" % (row.id, metres))
     if x:
         figure.add_trace(
             go.Scatter3d(

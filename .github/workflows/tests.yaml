@@ -35,6 +35,9 @@ jobs:
     needs: lint
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    env:
+      # Where cafein.sampledata keeps the files that the tests download
+      CAFEIN_SAMPLEDATA_DIR: ${{ github.workspace }}/.sampledata
     defaults:
       run:
         shell: bash -l {0}
@@ -60,6 +63,12 @@ jobs:
         with:
           environment-file: ci/test-environment.yaml
           create-args: python=${{ matrix.python }}
+
+      - name: Cache the sample data of the tests
+        uses: actions/cache@v4
+        with:
+          path: .sampledata
+          key: sampledata-helsinki-${{ runner.os }}-${{ hashFiles('ci/test-environment.yaml') }}
 
       - name: Install pyrosm from its main branch
         # The indoor reads are not in a pyrosm release yet. Build the Cython

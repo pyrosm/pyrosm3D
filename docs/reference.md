@@ -20,3 +20,13 @@ The functions draw frames that were read with pyrosm, also after you have change
 
 .. autofunction:: pyrosm3d.plot_network
 ```
+
+## Heights in metres
+
+```{eval-rst}
+.. automodule:: pyrosm3d.heights
+
+.. autofunction:: pyrosm3d.network_heights
+
+.. autofunction:: pyrosm3d.dem.sample_dem
+```

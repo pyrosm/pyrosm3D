@@ -17,6 +17,36 @@ def helsinki_indoor():
 
 
 @pytest.fixture(scope="session")
+def helsinki_dem():
+    """The terrain model of cafein.sampledata's Helsinki files, downloaded on first
+    use: the National Land Survey of Finland's elevation model, in 10 m pixels and
+    whole metres (EPSG:3067)."""
+    import cafein.sampledata.helsinki as helsinki
+
+    return helsinki.dem
+
+
+@pytest.fixture(scope="session")
+def helsinki_centre_osm():
+    """pyrosm's reader of the area around Helsinki's railway station, Forum and Kamppi
+    in the OpenStreetMap extract of cafein.sampledata's Helsinki files, downloaded on
+    first use."""
+    import cafein.sampledata.helsinki as helsinki
+
+    box = [24.9270, 60.1655, 24.9470, 60.1740]
+    return OSM(str(helsinki.osm_pbf), bounding_box=box)
+
+
+@pytest.fixture(scope="session")
+def helsinki_centre(helsinki_centre_osm):
+    """The nodes and edges of the walking network of the centre of Helsinki, with
+    indoor elements and lines across walking areas."""
+    return helsinki_centre_osm.get_network(
+        "walking", nodes=True, indoor_elements=True, walking_areas=True
+    )
+
+
+@pytest.fixture(scope="session")
 def maunula_osm():
     """pyrosm's reader of Maunula-talo, a community centre in Helsinki with three
     mapped floors."""

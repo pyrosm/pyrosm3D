@@ -3,7 +3,8 @@ import pandas as pd
 import pytest
 from shapely.geometry import LineString, Point
 
-from pyrosm3d import plot_network
+from pyrosm3d import network_heights, plot_network
+from pyrosm3d.dem import sample_dem
 from pyrosm3d.network import _STYLES, _edge_kind, _edge_text, _graph_frames
 
 
@@ -63,6 +64,80 @@ def test_plot_network_draws_an_indoor_network(helsinki_indoor):
     assert abs(xy).max() > 200
 
 
+def test_plot_network_draws_heights_in_metres(helsinki_centre, helsinki_dem):
+    """With a terrain model the centre of Helsinki is drawn at the heights of
+    network_heights, on an axis in metres: a lift is a vertical line between the
+    heights of its two ends, which the hover texts give; the route runs down it; the
+    entrance of node 249350774 is at the network's height on its level (12.7 m, the
+    ground is at 15 m) and that of node 2261292460, which the network meets on another
+    level only, on the ground. Where the terrain model has no heights, edges and
+    entrances are left out."""
+    nodes, edges = helsinki_centre
+    found = network_heights(edges, helsinki_dem).set_index("id")
+    lift, entrance, on_ground = 2039713549, 249350774, 2261292460
+    figure = plot_network(edges, nodes, route=[-lift * 1000 - 1, lift], dem=helsinki_dem)
+    scene = figure.layout.scene
+    assert scene.zaxis.title.text == "height (m)" and scene.aspectratio.z == 0.25
+    traces = _traces(figure)
+    ends = found.loc[lift, ["u_height", "v_height"]].round(2).tolist()
+    assert ends == [-3.94, 4.05]
+    lifts = traces["Lifts"]
+    assert list(lifts.z[:3]) == ends + [None] and lifts.x[0] == lifts.x[1]
+    assert lifts.text[0].endswith("levels -2 → 0<br>-3.9 m")
+    assert list(traces["Route"].z) == ends[::-1] + [None]
+    assert traces["Route"].text[1] == "route<br>-3.9 m"
+
+    heights = dict(zip(traces["Station entrances"].text, traces["Station entrances"].z))
+    end = found[(found["u"] == entrance) & (found["u_level"] == 0)]["u_height"].iloc[0]
+    assert heights["entrance %d<br>12.7 m" % entrance] == end
+    place = nodes[nodes["id"] == on_ground].geometry.iloc[0]
+    ground = sample_dem([place.x], [place.y], helsinki_dem)[0]
+    assert heights["entrance %d<br>4.0 m" % on_ground] == ground == 4.0
+
+    def west_only(longitudes, latitudes):
+        heights = sample_dem(longitudes, latitudes, helsinki_dem)
+        return np.where(longitudes > 24.937, np.nan, heights)
+
+    west = _traces(plot_network(edges, nodes, dem=west_only))
+    assert 0 < len(west["Station entrances"].x) < len(heights)
+    streets = "Walkways at street level"
+    assert 0 < len(west[streets].x) < len(traces[streets].x)
+    assert not any(z != z for z in west[streets].z if z is not None)
+
+
+def test_plot_network_puts_an_entrance_on_its_edge_in_metres():
+    """An entrance on level -1 in the middle of a tunnel between two streets at 10 m
+    and 14 m, under a hill of 100 m: the tunnel has no level columns and is drawn on
+    level -1, so the entrance is at the tunnel's height there, 12 m, not on the hill."""
+    from geopandas import GeoDataFrame
+
+    def line(west, east):
+        return LineString([(24.94 + west * 1e-3, 60.17), (24.94 + east * 1e-3, 60.17)])
+
+    edges = GeoDataFrame(
+        {
+            "u": [1, 2, 3, 4],
+            "v": [2, 3, 4, 5],
+            "tags": [None, '{"tunnel":"yes"}', '{"tunnel":"yes"}', None],
+        },
+        geometry=[line(-1, 0), line(0, 1), line(1, 2), line(2, 3)],
+        crs=4326,
+    )
+    nodes = GeoDataFrame(
+        {"id": [3], "railway": ["subway_entrance"], "level": ["-1"]},
+        geometry=[Point(24.941, 60.17)],
+        crs=4326,
+    )
+
+    def hill(longitudes, latitudes):
+        east = (longitudes - 24.94) * 1e3
+        return np.where(east < 0.5, 10.0, np.where(east < 1.5, 100.0, 14.0))
+
+    entrances = _traces(plot_network(edges, nodes, dem=hill))["Station entrances"]
+    assert list(entrances.z) == pytest.approx([12.0], abs=0.01)
+    assert list(entrances.text) == ["entrance 3<br>12.0 m"]
+
+
 @pytest.mark.parametrize("graph_type", ["networkx", "igraph"])
 def test_plot_network_draws_graphs(helsinki_indoor, graph_type):
     """A graph of get_graph(indoor_elements=True) draws the same kinds as its frames,
@@ -81,7 +156,8 @@ def test_plot_network_draws_a_graph_made_by_hand():
     """A networkx graph with line geometries: the two directions of an edge are drawn
     once, a parallel edge of another way too; no entrances without node coordinates or
     entrance nodes; with radius 0 what touches the center is drawn, an entrance there
-    too, and a route in full, also along an edge beyond the radius (nodes 2 to 3)."""
+    too, and a route in full, also along an edge beyond the radius (nodes 2 to 3).
+    With a terrain model, here a function, the graph is drawn at its heights."""
     import networkx as nx
 
     graph = nx.MultiDiGraph()
@@ -107,11 +183,16 @@ def test_plot_network_draws_a_graph_made_by_hand():
     )
     assert max(x for x in traces["Walkways at street level"].x if x is not None) < 100
     assert max(x for x in traces["Route"].x if x is not None) > 500
+    traces = _traces(plot_network(graph, dem=lambda lons, lats: 100 * (lons - 24.94)))
+    assert list(traces["Walkways at street level"].z) == [0, 0.1, None, 0.1, 1.0, None]
+    assert list(traces["Platforms"].z) == [0, 0.1, None]
+    assert list(traces["Station entrances"].z) == [0]
 
 
 def test_plot_network_refuses_what_it_cannot_draw():
     """A network without line geometries is refused with a pointer to the frames, a
-    network without edges and a radius below 0 too."""
+    network without edges and a radius below 0 too; so are areas together with a
+    terrain model, and a terrain model without a height for any edge."""
     import networkx as nx
     from geopandas import GeoDataFrame
 
@@ -126,6 +207,12 @@ def test_plot_network_refuses_what_it_cannot_draw():
     for radius in (-1, np.nan):
         with pytest.raises(ValueError, match="radius must be at least 0"):
             plot_network(Network(), radius=radius)
+    line = LineString([(24.94, 60.17), (24.941, 60.17)])
+    edges = GeoDataFrame({"u": [1], "v": [2]}, geometry=[line], crs=4326)
+    with pytest.raises(ValueError, match="give areas or dem, not both"):
+        plot_network(edges, areas=edges, dem=lambda lons, lats: lons)
+    with pytest.raises(ValueError, match="found no heights for the edges"):
+        plot_network(edges, dem=lambda lons, lats: lons * np.nan)
 
 
 @pytest.mark.parametrize(
