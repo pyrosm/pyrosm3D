@@ -4,6 +4,9 @@
 // entry off, clicks one point, closes the tags panel and moves two fingers on the
 // view, and prints what was shown as JSON.
 //
+// A figure written as HTML outside such a page (no page data in the file) is run the
+// same way: its scripts, then the two fingers; the JSON holds what the scripts set.
+//
 // usage: node page_harness.js <page.html> <legend entry to switch off> <trace to click>
 //        <small or wide: the size of the page>
 const fs = require("fs");
@@ -11,6 +14,7 @@ const vm = require("vm");
 
 const [file, entry, clicked, size] = process.argv.slice(2);
 const page = fs.readFileSync(file, "utf8");
+const isPage = page.includes('id="page-data"');
 
 function element(tag) {
   const made = {
@@ -19,6 +23,7 @@ function element(tag) {
     dataset: {},
     attributes: {},
     listeners: {},
+    style: {},
     textContent: "",
     appendChild(child) { this.children.push(child); },
     replaceChildren(...children) { this.children = children; },
@@ -47,11 +52,13 @@ plot.clientHeight = 200;
 plot.contains = (node) => node === plot;
 plot._fullLayout = { scene: { _scene: scene } };
 const data = element("script");
-data.textContent = /<script type="application\/json" id="page-data">([\s\S]*?)<\/script>/.exec(page)[1];
 const panel = element("aside");
 const hint = element("p");
-hint.textContent = /<aside id="tags"><p>(.*?)<\/p>/.exec(page)[1];
-panel.children.push(hint);
+if (isPage) {
+  data.textContent = /<script type="application\/json" id="page-data">([\s\S]*?)<\/script>/.exec(page)[1];
+  hint.textContent = /<aside id="tags"><p>(.*?)<\/p>/.exec(page)[1];
+  panel.children.push(hint);
+}
 const elements = {
   plot: plot,
   "page-data": data,
@@ -155,6 +162,11 @@ function touches() {
 }
 
 setImmediate(() => {
+  if (!isPage) {
+    const set = { touchAction: plot.style.touchAction, layout: Object.assign({}, legendLayout) };
+    console.log(JSON.stringify(Object.assign(set, { touches: touches() })));
+    return;
+  }
   const out = { buttons: [], names: [], counts: [], views: {}, legendAtStart: legend() };
   elements.legend.listeners.click();
   out.legendAfterClick = legend();

@@ -4,7 +4,6 @@ of a clicked element."""
 
 import html
 import json
-from importlib import resources
 from pathlib import Path
 from string import Template
 
@@ -15,6 +14,7 @@ from pyrosm3d.indoor import indoor_layers
 from pyrosm3d.network import EDGE_NAMES, _edge_kinds, end_levels_text
 from pyrosm3d.styles import AREA_STYLES, DOOR_STYLE, POI_STYLE
 from pyrosm3d.tags import element_keys, row_tags
+from pyrosm3d.touch import package_text
 
 
 def to_html(
@@ -90,16 +90,15 @@ def layers_page(indoor, path, title="Indoor elements", include_plotlyjs=True):
         "elements": elements,
         "about": {key: notes[key] for key in elements},
     }
-    files = resources.files("pyrosm3d")
     plot = plotly.io.to_html(
         figure,
         full_html=False,
         include_plotlyjs=include_plotlyjs,
         div_id="plot",
-        post_script=files.joinpath("page.js").read_text(encoding="utf-8"),
+        post_script=[package_text("touch.js"), package_text("page.js")],
         config=dict(displaylogo=False, responsive=True),
     )
-    page = Template(files.joinpath("page.html").read_text(encoding="utf-8"))
+    page = Template(package_text("page.html"))
     # No "<" in the JSON, so that no tag value can end the script block that holds it
     data = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c")
     path = Path(path)

@@ -1,10 +1,6 @@
 import json
-import os
 import re
-import shutil
-import subprocess
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 from shapely.geometry import box
@@ -12,23 +8,6 @@ from shapely.geometry import box
 from pyrosm3d.figure import _view_box, layers_figure, level_views
 from pyrosm3d.page import _element_notes, layers_page
 from pyrosm3d.styles import AREA_STYLES
-
-
-def _run_page(path, entry, clicked, size="wide"):
-    """What the page at ``path`` shows on a page of the ``size`` ("wide" or "small")
-    when its legend button and each of its level buttons are pressed, the legend
-    ``entry`` is switched off, the first point of the trace ``clicked`` is clicked,
-    the tags panel is closed and two fingers move on the view: the JSON of
-    ``page_harness.js``, which runs the page's scripts in node."""
-    node = shutil.which("node")
-    if node is None:
-        if os.environ.get("CI"):
-            pytest.fail("the page script is tested with node, which is not installed")
-        pytest.skip("node is not installed")
-    harness = Path(__file__).parent / "page_harness.js"
-    command = [node, str(harness), str(path), entry, clicked, size]
-    done = subprocess.run(command, capture_output=True, encoding="utf-8", check=True)
-    return json.loads(done.stdout)
 
 
 def _on_level(figure, level, legendonly):
@@ -42,7 +21,9 @@ def _on_level(figure, level, legendonly):
     ]
 
 
-def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
+def test_to_html_writes_a_page_with_level_buttons_and_tags(
+    maunula, tmp_path, run_scripts
+):
     """The page holds the figure of plot_indoor and loads plotly as asked; the elements
     that its script uses come before the script in the page, and a name that tries to
     end a script block stays text: it adds no script to the page and shows as it is
@@ -82,7 +63,7 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     assert "cdn.plot.ly" in online.read_text(encoding="utf-8")
 
     figure = layers_figure(maunula)
-    shown = _run_page(path, "Rooms", "Rooms")
+    shown = run_scripts(path, "Rooms", "Rooms")
     assert shown["buttons"] == ["All levels", "0", "1", "2"]
     floors = maunula.areas[maunula.areas["kind"].isin(list(AREA_STYLES))]
     counts = [sum(level in on for on in floors["levels"]) for level in (0.0, 1.0, 2.0)]
@@ -103,7 +84,7 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
         tmp_path / "above.html",
         include_plotlyjs=False,
     )
-    above = _run_page(path_above, "Rooms", "Rooms")
+    above = run_scripts(path_above, "Rooms", "Rooms")
     assert (above["buttons"][-1], above["names"][-1]) == ("7", "Level 7, 0 areas")
     assert above["counts"][-1] == ["small 0"]
     assert (above["buttons"][2], above["names"][2]) == ("0.5", "Level 0.5, 1 area")
@@ -147,7 +128,7 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     assert shown["legendAtStart"] == {"pressed": "true", "layout": {"showlegend": True}}
     assert shown["legendAfterClick"]["pressed"] == "false"
     assert shown["legendAfterClick"]["layout"] == {"showlegend": False}
-    small = _run_page(path, "Rooms", "Rooms", size="small")
+    small = run_scripts(path, "Rooms", "Rooms", size="small")
     over_the_view = {"legend.x": 0, "legend.xanchor": "left"}
     assert small["legendAtStart"]["pressed"] == "false"
     assert small["legendAtStart"]["layout"].items() >= over_the_view.items()

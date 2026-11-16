@@ -25,7 +25,8 @@ def test_plot_network_draws_an_indoor_network(helsinki_indoor):
     a line, drawn over the edges with markers at its ends, that rises through the lift
     (a step that is not an edge left out, no route without the u and v columns;
     repeated index labels are fine); polygon and line areas are outlines at the level
-    of their JSON tags (the point at the center left out) and entrances markers;
+    of their JSON tags (the point at the center left out), and entrances markers
+    that are hidden until they are picked in the legend, unlike the other kinds;
     stairs, escalators, moving walkways, lifts and platforms each have a colour of
     their own."""
     osm, nodes, edges = helsinki_indoor
@@ -38,6 +39,8 @@ def test_plot_network_draws_an_indoor_network(helsinki_indoor):
     traces = _traces(figure)
     assert {"Escalators", "Stairs", "Lifts", "Platforms", "Route"} <= set(traces)
     assert {"Area outlines", "Station entrances", "Lines across areas"} <= set(traces)
+    assert traces["Station entrances"].visible == "legendonly"
+    assert traces["Lifts"].visible is None
     lift = traces["Lifts"]
     assert [lift.z[i] for i in range(3)] == [-2.0, 0.0, None]
     route_z = pd.Series(traces["Route"].z)
