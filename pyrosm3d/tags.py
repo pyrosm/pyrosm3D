@@ -24,9 +24,10 @@ _FIELD_COLUMNS = {
     "geometry",
 }
 # Numeric columns that get_network computes: the end node ids of an edge, its length in
-# metres and the levels at its two ends. A text column of one of these names holds the
+# metres and the levels at its two ends; and the heights in metres that
+# pyrosm3d.heights.network_heights adds. A text column of one of these names holds the
 # OSM tag of that name.
-_NETWORK_COLUMNS = ("u", "v", "length", "u_level", "v_level")
+_NETWORK_COLUMNS = ("u", "v", "length", "u_level", "v_level", "u_height", "v_height")
 # The values of the column ``vertical`` that get_network(indoor_elements=True) computes.
 _VERTICAL_VALUES = {"escalator", "moving_walkway", "stairs", "lift"}
 # Element fields the readers put into a JSON ``tags`` dict when they are not columns.
@@ -85,7 +86,8 @@ def _tag_columns(frame):
     """The columns of ``frame`` that hold tags: all but its geometry, the element fields
     and the columns get_network computes (numeric ``u``, ``v``, ``length``, ``u_level``
     and ``v_level``, boolean ``walking_area``, and ``vertical`` in an indoor network,
-    see :func:`_is_indoor_network`)."""
+    see :func:`_is_indoor_network`) or :func:`pyrosm3d.heights.network_heights` adds
+    (numeric ``u_height`` and ``v_height``)."""
     computed = {
         column
         for column in _NETWORK_COLUMNS

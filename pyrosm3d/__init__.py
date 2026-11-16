@@ -4,6 +4,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 from pyrosm3d.accessor import In3D
 from pyrosm3d.figure import plot_indoor
+from pyrosm3d.heights import network_heights
 from pyrosm3d.network import plot_network
 from pyrosm3d.page import to_html
 
@@ -14,6 +15,7 @@ except PackageNotFoundError:  # running from a source tree without an install
 
 __all__ = [
     "In3D",
+    "network_heights",
     "plot_indoor",
     "plot_network",
     "to_html",

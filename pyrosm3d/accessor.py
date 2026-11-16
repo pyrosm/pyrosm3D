@@ -1,6 +1,7 @@
 """The ``in3d`` accessor of ``pyrosm.OSM``: 3D views of what an OSM object reads."""
 
 from pyrosm3d.figure import plot_indoor
+from pyrosm3d.heights import network_heights
 from pyrosm3d.network import plot_network
 from pyrosm3d.page import to_html
 
@@ -81,8 +82,55 @@ class In3D:
             **self._indoor_frames(),
         )
 
+    def _network(self, network_type, **read_options):
+        """The nodes and edges of ``get_network(network_type, nodes=True,
+        indoor_elements=True)`` of the OSM object, with its other ``read_options``; a
+        ValueError when the read finds no network of the type."""
+        nodes, edges = self._osm.get_network(
+            network_type, nodes=True, indoor_elements=True, **read_options
+        )
+        if edges is None:
+            raise ValueError("in3d found no %s network." % network_type)
+        return nodes, edges
+
+    def get_network(self, dem, network_type="walking", **read_options):
+        """The nodes and edges of the network with its indoor elements, the edges
+        with heights in metres from a terrain model: streets on the terrain, floors
+        placed from the streets that they meet (see
+        :func:`pyrosm3d.network_heights`).
+
+        Parameters
+        ----------
+        dem : str or pathlib.Path, a sequence of them, or a function
+            The terrain model: a raster file of heights such as a GeoTIFF (reading one
+            needs ``pip install "pyrosm3d[dem]"``), several tiles of one, or a function
+            ``(longitudes, latitudes) -> heights``.
+        network_type : str
+            The network that is read: ``get_network(network_type, nodes=True,
+            indoor_elements=True)``, so ``"walking"``, ``"all"`` or ``"all_public"``.
+        **read_options
+            Other arguments of ``pyrosm.OSM.get_network``, such as
+            ``walking_areas=True`` or ``extra_attributes``.
+
+        Returns
+        -------
+        (GeoDataFrame, GeoDataFrame)
+            The nodes as they were read, and the edges with the columns ``u_height``
+            and ``v_height``, the height at each end of an edge, and with lines that
+            have a height at every vertex. Where the terrain model has no height, the
+            height of an end is NaN and a line with such a vertex stays flat.
+        """
+        nodes, edges = self._network(network_type, **read_options)
+        return nodes, network_heights(edges, dem)
+
     def plot_network(
-        self, network_type="walking", center=None, radius=None, route=None, graph=None
+        self,
+        network_type="walking",
+        center=None,
+        radius=None,
+        route=None,
+        graph=None,
+        dem=None,
     ):
         """A plotly Figure of the network with its indoor elements in 3D: the edges at
         their levels, with stairs, escalators, lifts and platforms told apart.
@@ -105,19 +153,17 @@ class In3D:
             A graph of ``get_graph(indoor_elements=True)``, such as the one that the
             ``route`` was found in. It is drawn instead of the network of
             ``network_type``, which is then not read.
+        dem : str or pathlib.Path, a sequence of them, or a function (optional)
+            A terrain model, as :meth:`get_network` takes it. The network is then
+            drawn at heights in metres, not at its levels.
 
         Returns
         -------
         plotly.graph_objects.Figure
             The figure of :func:`pyrosm3d.plot_network`.
         """
+        view = dict(center=center, radius=radius, route=route, dem=dem)
         if graph is not None:
-            return plot_network(graph, center=center, radius=radius, route=route)
-        nodes, edges = self._osm.get_network(
-            network_type, nodes=True, indoor_elements=True
-        )
-        if edges is None:
-            raise ValueError(
-                "in3d.plot_network found no %s network to draw." % network_type
-            )
-        return plot_network(edges, nodes, center=center, radius=radius, route=route)
+            return plot_network(graph, **view)
+        nodes, edges = self._network(network_type)
+        return plot_network(edges, nodes, **view)

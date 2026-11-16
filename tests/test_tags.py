@@ -26,8 +26,8 @@ def test_row_tags_of_a_network_read(helsinki_indoor):
 def test_row_tags_of_a_frame_made_by_hand():
     """Values are the strings OSM stores (yes and no for booleans, whole floats without
     a decimal, a 32-bit float with its own digits); ``id_tag`` is the tag ``id``; a
-    column without a name and the columns
-    of an indoor network are left out; a column's value wins over the JSON tag of its
+    column without a name and the columns of an indoor network, also those of its
+    heights in metres, are left out; a column's value wins over the JSON tag of its
     key, and its missing value removes that tag; JSON tags may be a string or a dict,
     their element fields (a version that is not text) and missing values (None, NaN,
     ``pd.NA``, ``pd.NaT``) are left out, and a string that is not JSON gives no tags."""
@@ -47,6 +47,8 @@ def test_row_tags_of_a_frame_made_by_hand():
             "length": [5.0, 6.0, 7.0],
             "u_level": [0.0, np.nan, 1.0],
             "v_level": [0.0, np.nan, 2.0],
+            "u_height": [7.5, np.nan, 7.5],
+            "v_height": [7.5, np.nan, 11.5],
             "vertical": [None, None, "stairs"],
             "walking_area": [False, True, False],
             "tags": [
