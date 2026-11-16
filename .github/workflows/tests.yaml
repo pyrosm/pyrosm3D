@@ -68,7 +68,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .sampledata
-          key: sampledata-dem-${{ runner.os }}-${{ hashFiles('ci/test-environment.yaml') }}
+          key: sampledata-helsinki-${{ runner.os }}-${{ hashFiles('ci/test-environment.yaml') }}
 
       - name: Install pyrosm from its main branch
         # The indoor reads are not in a pyrosm release yet. Build the Cython
