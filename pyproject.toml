@@ -44,7 +44,7 @@ Repository = "https://github.com/pyrosm/pyrosm3D"
 include = ["pyrosm3d*"]
 
 [tool.setuptools.package-data]
-pyrosm3d = ["page.html", "page.js"]
+pyrosm3d = ["figure.js", "page.html", "page.js", "touch.js"]
 
 [tool.black]
 target-version = ["py311", "py312", "py313", "py314"]

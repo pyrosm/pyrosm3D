@@ -54,6 +54,7 @@ from pyrosm3d.styles import (
     WALL_STYLE,
 )
 from pyrosm3d.tags import element_keys
+from pyrosm3d.touch import TouchFigure
 from pyrosm3d.walls import building_outlines, inner_walls, outer_walls, wall_panels
 
 # Metres that outlines and network lines are drawn above their floor, to stay visible
@@ -91,7 +92,8 @@ def plot_indoor(elements, edges=None, nodes=None, buildings=None, level=None):
     -------
     plotly.graph_objects.Figure
         A click on a legend entry hides or shows it. The outer walls, the doors and
-        the shops are hidden until they are picked in the legend.
+        the shops are hidden until they are picked in the legend. As HTML the figure
+        has the controls for touch screens of :class:`pyrosm3d.touch.TouchFigure`.
     """
     return layers_figure(indoor_layers(elements, nodes, edges, buildings), level)
 
@@ -137,7 +139,7 @@ def layers_figure(indoor, level=None):
         trace.showlegend = trace.legendgroup not in in_legend
         in_legend.add(trace.legendgroup)
     levels = sorted({float(lv) for trace in traces for lv in trace.meta["levels"]})
-    return go.Figure(traces, _layout(box, levels, between))
+    return TouchFigure(traces, _layout(box, levels, between))
 
 
 def _view_box(indoor):

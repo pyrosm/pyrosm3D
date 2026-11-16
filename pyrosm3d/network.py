@@ -32,6 +32,7 @@ from pyrosm3d.tags import (
     level_ranges,
     row_tags,
 )
+from pyrosm3d.touch import TouchFigure
 
 # (name in the legend, colour, line width, dash) of each kind of edge
 _STYLES = {
@@ -379,6 +380,8 @@ def plot_network(
     plotly.graph_objects.Figure
         Show it in a notebook with ``fig.show()``, in a browser window with
         ``fig.show(renderer="browser")``, or save it with ``fig.write_html(path)``.
+        As HTML it has the controls for touch screens of
+        :class:`pyrosm3d.touch.TouchFigure`.
     """
     if radius is not None and not radius >= 0:
         raise ValueError("radius must be at least 0 metres, not %r." % (radius,))
@@ -430,7 +433,7 @@ def plot_network(
         (row.u, row.v): _edge_points(row.geometry, kind, z_u, z_v, origin, in_metres)
         for row, _, kind, z_u, z_v in _edge_kinds(on_route)
     }
-    figure = go.Figure()
+    figure = TouchFigure()
     if areas is not None:
         _add_area_outlines(traces["area"], areas.to_crs(crs), middle, radius)
     for kind, (name, colour, width, dash) in _STYLES.items():
