@@ -348,8 +348,9 @@ def plot_network(
         the tags of its way.
     nodes : GeoDataFrame (optional)
         The nodes of the same read: their station entrances (``railway`` tagged
-        ``subway_entrance`` or ``train_station_entrance``) are drawn as markers, and the
-        ``route`` is drawn through them. Taken from the graph when ``edges`` is one.
+        ``subway_entrance`` or ``train_station_entrance``) are markers that are hidden
+        until they are picked in the legend, and the ``route`` is drawn through them.
+        Taken from the graph when ``edges`` is one.
     center : (lon, lat) or shapely Point (optional)
         The middle of the view; by default the middle of the edges.
     radius : float (optional)
@@ -575,7 +576,8 @@ def _entrance_heights(entrances, levels, edges, dem):
 def _add_entrances(figure, entrances, heights, middle, radius, in_metres=False):
     """Add the station ``entrances`` (in metres) within ``radius`` of ``middle`` as
     markers at their ``heights``, levels or metres (``in_metres``: the hover text
-    gives them, and an entrance without a height is left out)."""
+    gives them, and an entrance without a height is left out). The markers are hidden
+    until they are picked in the legend."""
     x, y, z, text = [], [], [], []
     for row, height in zip(entrances.itertuples(), heights):
         point = row.geometry
@@ -595,6 +597,7 @@ def _add_entrances(figure, entrances, heights, middle, radius, in_metres=False):
                 text=text,
                 mode="markers",
                 name="Station entrances",
+                visible="legendonly",
                 marker=dict(size=3.5, symbol="diamond", color="#1f2329"),
                 hovertemplate="%{text}<extra></extra>",
             )
