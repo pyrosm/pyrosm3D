@@ -24,7 +24,8 @@ def test_plot_network_draws_an_indoor_network(helsinki_indoor):
     line from level -2 to 0; a radius keeps what reaches near the center; the route is
     a line, drawn over the edges with markers at its ends, that rises through the lift
     (a step that is not an edge left out, no route without the u and v columns;
-    repeated index labels are fine); polygon and line areas are outlines at the level
+    repeated index labels are fine; the same route for edges in another coordinate
+    system); polygon and line areas are outlines at the level
     of their JSON tags (the point at the center left out), and entrances markers
     that are hidden until they are picked in the legend, unlike the other kinds;
     stairs, escalators, moving walkways, lifts and platforms each have a colour of
@@ -52,6 +53,8 @@ def test_plot_network_draws_an_indoor_network(helsinki_indoor):
     points = [p for p in zip(line.x, line.y, line.z) if p[0] is not None]
     assert list(zip(ends.x, ends.y, ends.z)) == [points[0], points[-1]]
     assert ends.legendgroup == line.legendgroup and ends.showlegend is False
+    moved = _traces(plot_network(edges.to_crs(3067), route=route, **near))["Route"]
+    assert list(moved.z) == list(line.z)
     assert line.line.color == ends.marker.color == "#e8002d"
     assert line.line.dash == "solid" and line.line.width == 10
     assert traces["Platforms"].line.color == "#199e70"
@@ -159,21 +162,28 @@ def test_plot_network_draws_graphs(helsinki_indoor, graph_type):
     Vilhonkatu (way 29498962) and Rautatientori (ways 4247505 and 34732049). The edge
     from 946518188 to 946518151 turns a corner between its two ways: its parts are as
     long as the ways' segments are in the graph without simplification, 17.63 m and
-    32.02 m."""
+    32.02 m.
+
+    The nodes 1369465828 and 1369465823 are joined by two edges, 40.1 m (way 29690379)
+    and 63.8 m (way 122595265) long: a route between them is drawn along the shorter.
+    The route's step between 173248856 and 1369465828 is no edge and is left out."""
     osm, _, _ = helsinki_indoor
     graph = osm.get_graph(
         "walking", graph_type=graph_type, indoor_elements=True, retain_all=True
     )
     tunnel_edge = (1514631272, 173248856)
-    figure = plot_network(
-        graph, center=(24.9415, 60.1712), radius=200, route=list(tunnel_edge)
-    )
+    route = [*tunnel_edge, 1369465828, 1369465823]
+    figure = plot_network(graph, center=(24.9415, 60.1712), radius=200, route=route)
     traces = _traces(figure)
     assert {"Escalators", "Lifts", "Platforms", "Station entrances"} <= set(traces)
     n_edges = graph.ecount() if graph_type == "igraph" else graph.number_of_edges()
     merged = _graph_frames(graph)[0]
     assert len(merged) * 2 == n_edges
-    assert list(traces["Route"].z) == [0, 0, None, -1, -1, -1, None]
+    assert list(traces["Route"].z)[:7] == [0, 0, None, -1, -1, -1, None]
+    drawn = np.array(
+        [traces["Route"].x[7:-1], traces["Route"].y[7:-1]], dtype=float
+    )
+    assert np.hypot(*np.diff(drawn)).sum() == pytest.approx(40.1, abs=0.5)
     assert (
         "Walkways on other levels<br>way 16759161 · footway<br>level -1"
         in traces["Walkways on other levels"].text
@@ -244,7 +254,13 @@ def test_plot_network_draws_merged_edges_made_by_hand():
     Two edges are kept whole. The stairs from node 2 to 3 climb from level 0 to 1:
     the hover text names both ways and both names. The edge from node 3 to -5 has two
     segments, the two booleans of ``reversed`` and a list of three names: neither list
-    splits it."""
+    splits it.
+
+    With a second edge of 100 m between nodes 1 and 2, shorter than the split edge's
+    line, a route between the two nodes is drawn along that edge, not along the
+    parts. The second edge bends north, out of a terrain model that ends there: in
+    metres it has no heights, and the route's step is left out, not drawn along the
+    longer edge."""
     import networkx as nx
 
     def line(*east):
@@ -311,6 +327,17 @@ def test_plot_network_draws_merged_edges_made_by_hand():
     in_metres = _traces(plot_network(graph, dem=hill))
     tunnel = in_metres["Walkways on other levels"].z
     assert list(tunnel) == pytest.approx([10, 12, 14, None], abs=0.01)
+
+    bend = LineString([(24.943, 60.17), (24.9415, 60.171), (24.94, 60.17)])
+    graph.add_edge(2, 1, geometry=bend, id=16, length=100.0)
+    assert _edges_by_way(_graph_frames(graph)[0])[1] == {}
+    by_levels = _traces(plot_network(graph, route=[1, 2]))
+    assert list(by_levels["Route"].z) == [0, 0, 0, None]
+
+    def south(longitudes, latitudes):
+        return np.where(latitudes < 60.1705, hill(longitudes, latitudes), np.nan)
+
+    assert "Route" not in _traces(plot_network(graph, route=[1, 2], dem=south))
 
 
 def test_plot_network_refuses_what_it_cannot_draw():

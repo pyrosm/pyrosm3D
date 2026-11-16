@@ -124,7 +124,9 @@ def _edges_by_way(edges):
     A part is a run of segments with the same values: it has those values, the line of
     its segments, its share of the ``length`` and, where it meets the next part, a new
     node id below zero and below every id of the edges. ``chains`` holds the nodes
-    along each split edge, ``{(u, v): [u, ..., v]}``.
+    along each split edge, ``{(u, v): [u, ..., v]}``, when it is the shortest of the
+    edges between its two end nodes (see :func:`_shortest_between_nodes`): a route
+    follows it.
 
     An edge that climbs from one level to another is kept whole. A list of another
     length and a list of booleans (networkx's ``oneway`` and ``reversed`` hold the
@@ -139,6 +141,7 @@ def _edges_by_way(edges):
     climbs = np.isfinite(u_level) & np.isfinite(v_level) & (u_level != v_level)
     lowest = pd.to_numeric(edges[["u", "v"]].stack(), errors="coerce").min()
     spare = itertools.count(int(min(0, lowest)) - 1, -1)
+    shortest = _shortest_between_nodes(edges)
     parts, chains, split = [], {}, []
     for row in np.flatnonzero(listed & ~climbs).tolist():
         edge = edges.iloc[row].to_dict()
@@ -167,7 +170,8 @@ def _edges_by_way(edges):
             if "length" in edge:
                 ends["length"] = edge["length"] * (along[stop] - along[start])
             parts.append({**edge, **values, **ends})
-        chains[(edge["u"], edge["v"])] = nodes
+        if shortest[row]:
+            chains[(edge["u"], edge["v"])] = nodes
         split.append(row)
     if not split:
         return edges, chains
@@ -198,6 +202,24 @@ def _along_lines(lonlat, edge_of, count):
     place = (np.arange(len(lonlat)) - first[edge_of]) / (counts[edge_of] - 1)
     along = np.where(total > 0, run / np.where(total > 0, total, 1.0), place)
     return first, last, along, lengths
+
+
+def _shortest_between_nodes(edges):
+    """For each of ``edges``, whether it is the shortest of the edges between its two
+    end nodes, ``u`` and ``v`` either way round, ties included: by its ``length`` where
+    the frame has one, else by the length of its line in metres."""
+    lines = edges.geometry
+    if edges.crs is not None and edges.crs.to_epsg() != 4326:
+        lines = lines.to_crs(4326)
+    lonlat, edge_of = shapely.get_coordinates(lines.to_numpy(), return_index=True)
+    own = float_column(edges, "length")
+    drawn = _along_lines(lonlat, edge_of, len(edges))[3]
+    lengths = np.where(np.isnan(own), drawn, own).tolist()
+    pairs = [frozenset(pair) for pair in zip(edges["u"], edges["v"])]
+    least = {}
+    for pair, length in zip(pairs, lengths):
+        least[pair] = min(length, least.get(pair, length))
+    return np.array([length <= least[pair] for pair, length in zip(pairs, lengths)])
 
 
 def _differ(value, other):
@@ -360,7 +382,9 @@ def plot_network(
         A path through the network, such as a shortest path of a networkx graph, drawn
         as a wide red line along the edges between its nodes (``u`` and ``v``), also
         beyond ``radius``, with markers at its two ends; a click on "Route" in the
-        legend hides it.
+        legend hides it. Where several edges join two nodes, the route is drawn along
+        the shortest (by ``length`` where the edges have it, else by their lines); with
+        ``dem``, a step whose shortest edge has no heights is left out.
     areas : GeoDataFrame (optional)
         Polygons, such as platform areas or squares, drawn as outlines at their
         ``level`` (street level without one); lines are drawn as they are. Areas have
@@ -401,11 +425,18 @@ def plot_network(
     if is_graph:
         edges, chains = _edges_by_way(edges)
         route = route if route is None else _along_parts(route, chains)
+    followed = np.zeros(len(edges), dtype=bool)
+    if route is not None and "u" in edges.columns and "v" in edges.columns:
+        steps = set(zip(route[:-1], route[1:]))
+        steps |= {(b, a) for a, b in steps}
+        on_step = [pair in steps for pair in zip(edges["u"], edges["v"])]
+        followed = np.array(on_step, dtype=bool) & _shortest_between_nodes(edges)
     if in_metres:
         from pyrosm3d.heights import network_heights  # it imports this module
 
         edges = network_heights(edges, dem)
-        edges = edges[shapely.has_z(edges.geometry.to_numpy())]
+        drawn = shapely.has_z(edges.geometry.to_numpy())
+        edges, followed = edges[drawn], followed[drawn]
         if edges.empty:
             raise ValueError(
                 "plot_network found no heights for the edges in the terrain model."
@@ -418,11 +449,7 @@ def plot_network(
         point = center if hasattr(center, "x") else shapely.Point(*center)
         middle = GeoDataFrame(geometry=[point], crs=4326).to_crs(crs).geometry[0]
     origin = (middle.x, middle.y)
-    on_route = metric.iloc[:0]
-    if route is not None and "u" in metric.columns and "v" in metric.columns:
-        steps = set(zip(route[:-1], route[1:]))
-        steps |= {(b, a) for a, b in steps}
-        on_route = metric[[pair in steps for pair in zip(metric["u"], metric["v"])]]
+    on_route = metric[followed]
     if radius is not None:
         metric = metric[metric.distance(middle) <= radius]
     traces = {kind: _Trace() for kind in _STYLES}
@@ -431,7 +458,10 @@ def plot_network(
         text = _edge_text(row, edge_tags, kind, z_u, z_v)
         traces[kind].add(*points, text, in_metres)
     ends = {
-        (row.u, row.v): _edge_points(row.geometry, kind, z_u, z_v, origin, in_metres)
+        frozenset((row.u, row.v)): (
+            row.u,
+            _edge_points(row.geometry, kind, z_u, z_v, origin, in_metres),
+        )
         for row, _, kind, z_u, z_v in _edge_kinds(on_route)
     }
     figure = TouchFigure()
@@ -466,17 +496,16 @@ def plot_network(
 
 def _add_route(figure, route, ends, in_metres):
     """Add the ``route`` (node ids) as a line along the edges between consecutive nodes,
-    either way (``ends``: ``{(u, v): (x, y, z)}``, the points of each edge as drawn,
-    z ``in_metres`` or in levels), with markers at its first and last point; steps
-    without an edge are left out."""
+    either way (``ends``: ``{frozenset((u, v)): (u, (x, y, z))}``, the node an edge
+    starts at and its points as drawn, z ``in_metres`` or in levels), with markers at
+    its first and last point; steps without an edge are left out."""
     line_trace = _Trace()
     for a, b in zip(route[:-1], route[1:]):
-        if (a, b) in ends:
-            points = ends[(a, b)]
-        elif (b, a) in ends:
-            points = [values[::-1] for values in ends[(b, a)]]
-        else:
+        if frozenset((a, b)) not in ends:
             continue
+        start, points = ends[frozenset((a, b))]
+        if start != a:
+            points = [values[::-1] for values in points]
         line_trace.add(*points, "route", in_metres)
     if not line_trace.x:
         return
