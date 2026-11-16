@@ -4,6 +4,7 @@ mapped as lines or areas, and the outer walls along level and building outlines.
 import numpy as np
 import shapely
 
+from pyrosm3d.floors import floor_levels
 from pyrosm3d.styles import DOOR_GAP, DOOR_REACH, FLOOR_HEIGHT, WALL_HEIGHT
 from pyrosm3d.tags import _MAX_LEVEL_SPAN
 
@@ -51,9 +52,10 @@ def _closed_parts(start, along, length, doors):
 
 def inner_walls(indoor):
     """``{level: panels}`` of the walls inside the buildings of ``indoor`` (an
-    IndoorElements), see :func:`wall_panels`: along the outlines of the rooms
-    (``indoor=room``, apart from ``room=corridor``) on their whole levels, and along
-    the walls mapped as lines or as areas on each of their levels. Walls are cut away
+    IndoorLayers), see :func:`wall_panels`: along the outlines of the rooms
+    (``indoor=room``, apart from ``room=corridor``) on their whole levels (a room
+    without a whole level: on the level of its floor), and along the walls mapped as
+    lines or as areas on each of their levels. Walls are cut away
     at ``WALL_HEIGHT``; a tall room over several levels has walls a full storey high on
     every level from its lowest up to the one below its highest."""
     doors = _doors_by_level(indoor.doors)
@@ -74,7 +76,7 @@ def inner_walls(indoor):
 
 def outer_walls(indoor, view):
     """``({level: panels}, {level: polygons})``: the outer walls of ``indoor`` (an
-    IndoorElements) inside the box ``view``, and the floors under them. The walls
+    IndoorLayers) inside the box ``view``, and the floors under them. The walls
     stand a full storey high, with door gaps, along the level outlines
     (``indoor=level``) on their whole levels, and along the outline of each building
     that holds indoor areas but no level outline, on the whole levels of those
@@ -97,7 +99,7 @@ def outer_walls(indoor, view):
 
 def building_outlines(indoor, view):
     """``{level: [xy arrays]}``: the outlines of the buildings of ``indoor`` (an
-    IndoorElements) that are drawn as lines, inside the box ``view``. A building that
+    IndoorLayers) that are drawn as lines, inside the box ``view``. A building that
     holds indoor areas has its outline on the whole levels of those areas, and a
     station building (``building=train_station``) also on street level; a building
     with a level outline (``indoor=level``), which is a line already, has none."""
@@ -170,10 +172,13 @@ def _areas_by_building(indoor, view):
 
 def _room_wall_heights(kind, levels):
     """``{level: height}`` of the walls of a room of ``kind`` on ``levels`` (sorted):
-    cut away on each whole level; a tall room, on several whole levels and not a
-    shaft, has full walls on every level below its highest, also on levels that its
-    ``level`` tag leaves out."""
+    cut away on each whole level, and for a room without a whole level on the levels
+    of its floors (see :func:`pyrosm3d.floors.floor_levels`); a tall room, on several
+    whole levels and not a shaft, has full walls on every level below its highest,
+    also on levels that its ``level`` tag leaves out."""
     whole = [level for level in levels if float(level).is_integer()]
+    if not whole:
+        return dict.fromkeys(floor_levels(kind, levels), WALL_HEIGHT)
     if kind == "shaft" or len(whole) < 2 or whole[-1] - whole[0] > _MAX_LEVEL_SPAN:
         return dict.fromkeys(whole, WALL_HEIGHT)
     below_top = map(float, range(int(whole[0]), int(whole[-1])))

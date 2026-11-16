@@ -1,8 +1,7 @@
-"""The indoor elements of a place, read with pyrosm: areas such as rooms, corridors,
-platforms and squares, walls, doors, shops and amenities, building outlines and the
-walking network, in the metres of one UTM zone."""
+"""The layers that plot_indoor draws, from the frames that pyrosm reads: areas such as
+rooms, corridors, platforms and squares, walls, doors, shops and amenities, building
+outlines and the walking network, in the metres of one UTM zone."""
 
-import inspect
 from dataclasses import dataclass
 
 import numpy as np
@@ -16,20 +15,8 @@ from pyrosm3d.tags import (
     is_platform,
     layer_level,
     row_tags,
-    tag_levels,
 )
 
-# What is read for the areas and the walls: the elements with an indoor tag, the lifts
-# mapped as areas and the platforms
-_INDOOR_FILTER = {
-    "indoor": True,
-    "highway": ["elevator", "platform"],
-    "railway": ["platform"],
-    "public_transport": ["platform"],
-}
-# The keys by which pyrosm also picks areas to draw lines across: a square or a hall
-# mapped as ``highway=pedestrian``, a room tagged as a walkway
-_CROSSED_AREA_KEYS = ("highway", "room")
 # The rooms that are shafts: a space between floors, or one that people do not use
 _SHAFT_ROOMS = {"stairs", "elevator", "utility", "storage", "technical"}
 # The amenities that are drawn as shops
@@ -47,26 +34,27 @@ _LINE_SHAPES = ("LineString", "MultiLineString")
 
 
 @dataclass
-class IndoorElements:
-    """The indoor elements of a place, as :func:`read_indoor` reads them: GeoDataFrames
-    in the metres of one UTM zone.
+class IndoorLayers:
+    """The layers of a place that :func:`pyrosm3d.plot_indoor` draws, as
+    :func:`indoor_layers` makes them from pyrosm's frames: GeoDataFrames in the metres
+    of one UTM zone.
 
     Apart from the network, each frame has the columns ``id`` and ``osm_type`` of its
     elements, ``tags`` (a dict of an element's OSM tags) and the geometry. ``levels``
-    is a tuple of the levels an element is on, from its ``level`` tag: the ends of each
-    range and the whole levels between them. An area without a level (no ``level``
-    tag, or one that gives no level) that is a platform, or that lines of the network
-    cross, has the level of its lines in the network; where these have none, its layer
-    when that is below street level, else street level (0).
+    is a tuple of the levels an element is on, as pyrosm lists them in its ``levels``
+    column. An area without a level that is a platform or a walking area, or that
+    lines of the network cross, has the level of its lines in the network; where these
+    have none, its layer when that is below street level, else street level (0).
 
     Attributes
     ----------
     areas : GeoDataFrame
         The polygons with an ``indoor`` tag, the platform areas (``railway``,
         ``public_transport`` or ``highway`` is ``platform``), the lift areas
-        (``highway=elevator``) and the other areas that lines of the network cross,
-        such as a square or a station hall mapped as ``highway=pedestrian``, with
-        ``levels`` and a ``kind``: ``wall``, ``level`` (the outline of a floor),
+        (``highway=elevator``), the walking areas, such as a square or a station hall
+        mapped as ``highway=pedestrian``, and the other areas that lines of the network
+        cross, with ``levels`` and a ``kind``: ``wall``, ``level`` (the outline of a
+        floor),
         ``platform``, ``corridor``, ``shaft`` (stairwells, lifts and technical
         rooms), ``walking_area`` (an area without an ``indoor`` tag that is none of
         these), ``toilets``, ``shop``, ``room``, or ``indoor`` for ``indoor=yes`` and
@@ -94,65 +82,91 @@ class IndoorElements:
     edges: GeoDataFrame
 
 
-def read_indoor(osm):
-    """Read the indoor elements of the area of a ``pyrosm.OSM`` object.
+def indoor_layers(elements=None, nodes=None, edges=None, buildings=None):
+    """The layers of one place for :func:`pyrosm3d.plot_indoor`, from frames read with
+    pyrosm (``osm`` is a ``pyrosm.OSM`` object); a read that found nothing gives None,
+    which stands for a frame without rows.
 
     Parameters
     ----------
-    osm : pyrosm.OSM
-        The reader of a PBF file; a ``bounding_box`` given to ``pyrosm.OSM`` limits
-        what is read. The reads need a pyrosm that reads indoor elements
-        (``get_network(..., indoor_elements=True)``).
+    elements : GeoDataFrame (optional)
+        ``osm.get_indoor_elements(walking_areas=True)``.
+    nodes, edges : GeoDataFrame (optional)
+        ``osm.get_network("walking", nodes=True, indoor_elements=True,
+        walking_areas=True)``.
+    buildings : GeoDataFrame (optional)
+        ``osm.get_buildings()``.
 
     Returns
     -------
-    IndoorElements
+    IndoorLayers
     """
-    _require_indoor_reads(osm)
-    nodes, edges = osm.get_network(
-        "walking", nodes=True, indoor_elements=True, walking_areas=True
-    )
+    elements, buildings = _found(elements), _found(buildings)
     nodes, edges = _found(nodes), _found(edges)
+    crs = _utm_crs([elements, buildings, edges])
+    edges = edges.to_crs(crs)
     crossed = _crossed_areas(edges)
-    indoor = osm.get_data_by_custom_criteria(_area_filter(crossed), keep_nodes=False)
-    doors = osm.get_data_by_custom_criteria(
-        {"door": True, "entrance": True}, keep_ways=False, keep_relations=False
-    )
-    pois = osm.get_pois(custom_filter={"shop": True, "amenity": True})
-    frames = [_found(frame) for frame in (indoor, doors, pois, osm.get_buildings())]
-    indoor, doors, pois, buildings = frames
-    crs = _utm_crs(frames + [edges])
 
-    tags = row_tags(indoor)
-    is_area = _has_shape(indoor, _AREA_SHAPES) & np.array(
-        [
-            key in crossed or _fits(row, _INDOOR_FILTER)
-            for key, row in zip(element_keys(indoor), tags)
-        ],
+    listed = elements.get("levels", [None] * len(elements))
+    levels = [_listed_levels(text) for text in listed]
+    tags = row_tags(elements.drop(columns="levels", errors="ignore"))
+    keys = element_keys(elements)
+    is_area = _has_shape(elements, _AREA_SHAPES) & np.array(
+        [key in crossed or _is_drawn_as_area(row) for key, row in zip(keys, tags)],
         dtype=bool,
     )
-    is_wall = np.array([row.get("indoor") == "wall" for row in tags], dtype=bool)
-    is_wall_line = is_wall & _has_shape(indoor, _LINE_SHAPES)
-    is_door = _has_shape(doors, ("Point",))
+    is_wall = _where(tags, lambda row: row.get("indoor") == "wall")
+    is_wall_line = is_wall & _has_shape(elements, _LINE_SHAPES)
+    is_door = _where(tags, lambda row: "door" in row or "entrance" in row)
+    is_door_node = is_door & _has_shape(elements, ("Point",))
+    is_poi = _where(tags, lambda row: "shop" in row or "amenity" in row)
+    has_level = np.array([bool(found) for found in levels], dtype=bool)
     is_outline = _has_shape(buildings, _AREA_SHAPES)
-    poi_tags = row_tags(pois)
-    has_level = np.array([bool(tag_levels(row)) for row in poi_tags], dtype=bool)
-    pois = _layer(pois, poi_tags, has_level, crs, kind=_poi_kind, levels=tag_levels)
-    pois.geometry = pois.geometry.representative_point()
-    areas = _layer(indoor, tags, is_area, crs, kind=area_kind, levels=tag_levels)
-    return IndoorElements(
+
+    pois = _layer(elements, tags, levels, is_poi & has_level, crs, kind=_poi_kind)
+    pois.geometry = _marker_points(pois.geometry)
+    areas = _layer(elements, tags, levels, is_area, crs, kind=area_kind)
+    return IndoorLayers(
         areas=_with_line_levels(areas, edges, crossed),
-        walls=_layer(indoor, tags, is_wall_line, crs, levels=tag_levels),
-        doors=_layer(doors, row_tags(doors), is_door, crs, levels=tag_levels),
+        walls=_layer(elements, tags, levels, is_wall_line, crs),
+        doors=_layer(elements, tags, levels, is_door_node, crs),
         pois=pois,
-        buildings=_layer(buildings, row_tags(buildings), is_outline, crs),
+        buildings=_layer(buildings, row_tags(buildings), None, is_outline, crs),
         nodes=nodes.to_crs(crs),
-        edges=edges.to_crs(crs),
+        edges=edges,
     )
+
+
+def _listed_levels(text):
+    """The levels of a value of pyrosm's ``levels`` column (``"0;1;2"``) as a tuple of
+    floats; empty for a missing value."""
+    if not isinstance(text, str):
+        return ()
+    return tuple(float(level) for level in text.split(";"))
+
+
+def _is_drawn_as_area(tags):
+    """Whether a polygon with the OSM ``tags`` is an area also where no line crosses
+    it: it has an ``indoor`` tag, is a platform, or has a ``highway`` tag (a lift area,
+    or a walking area such as a square). A shop or an amenity mapped as a polygon
+    without these is a marker only."""
+    return "indoor" in tags or "highway" in tags or is_platform(tags)
+
+
+def _crossed_areas(edges):
+    """The keys (see :func:`pyrosm3d.tags.element_keys`) of the areas that lines of
+    ``edges`` cross (see :func:`pyrosm3d.tags.crosses_area`): a line across an area
+    has the id and the type of its area."""
+    return set(element_keys(edges[crosses_area(edges)]))
+
+
+def _where(tags, fits):
+    """Which rows, by their ``tags`` (a list of dicts), ``fits`` says yes to."""
+    return np.array([bool(fits(row)) for row in tags], dtype=bool)
 
 
 def area_kind(tags):
-    """The kind of an indoor area with the OSM ``tags`` (see :class:`IndoorElements`),
+    """The kind of an indoor area with the OSM ``tags`` (see :class:`IndoorLayers`),
     the first that fits."""
     indoor, room, amenity = (tags.get(key) for key in ("indoor", "room", "amenity"))
     if indoor in ("wall", "level"):
@@ -172,42 +186,11 @@ def area_kind(tags):
     return "indoor" if indoor in ("yes", "no") else "room"
 
 
-def _crossed_areas(edges):
-    """``{key: tags}`` of the areas that lines of ``edges`` cross (see
-    :func:`pyrosm3d.tags.crosses_area`): a line across an area has the id, the type
-    and the tags of its area; the key as :func:`pyrosm3d.tags.element_keys` gives it."""
-    across = edges[crosses_area(edges)]
-    return dict(zip(element_keys(across), row_tags(across)))
-
-
-def _area_filter(crossed):
-    """The filter of the read for the areas and the walls: :data:`_INDOOR_FILTER`, and
-    for each area among ``crossed`` (see :func:`_crossed_areas`) that it leaves out the
-    value of the first of :data:`_CROSSED_AREA_KEYS` that the area has."""
-    criteria = dict(_INDOOR_FILTER)
-    for tags in crossed.values():
-        key = next((key for key in _CROSSED_AREA_KEYS if key in tags), None)
-        if key is not None and not _fits(tags, _INDOOR_FILTER):
-            criteria[key] = sorted({*criteria.get(key, ()), tags[key]})
-    return criteria
-
-
-def _fits(tags, criteria):
-    """Whether an element with the OSM ``tags`` fits ``criteria``, a filter of
-    ``get_data_by_custom_criteria``: it has one of the keys with one of that key's
-    values, or with any value where the filter says True."""
-    return any(
-        key in tags and (values is True or tags[key] in values)
-        for key, values in criteria.items()
-    )
-
-
 def _with_line_levels(areas, edges, crossed):
-    """``areas`` with a level for each area that has none (no ``level`` tag, or one
-    that gives no level) and is a platform or among ``crossed`` (see
-    :func:`_crossed_areas`): the lowest level that pyrosm gave its lines among
-    ``edges`` (``u_level`` and ``v_level``); where these have none, the level of
-    :func:`pyrosm3d.tags.layer_level`."""
+    """``areas`` with a level for each area that has none and is a platform, a walking
+    area or among ``crossed`` (see :func:`_crossed_areas`): the lowest level that
+    pyrosm gave its lines among ``edges`` (``u_level`` and ``v_level``); where these
+    have none, the level of :func:`pyrosm3d.tags.layer_level`."""
     ends = (float_column(edges, "u_level"), float_column(edges, "v_level"))
     on_lines = {}
     for key, level in zip(element_keys(edges), np.fmin(*ends).tolist()):
@@ -216,7 +199,8 @@ def _with_line_levels(areas, edges, crossed):
     levels = areas["levels"].tolist()
     columns = (element_keys(areas), areas["kind"], areas["tags"])
     for row, (key, kind, tags) in enumerate(zip(*columns)):
-        if not levels[row] and (kind == "platform" or key in crossed):
+        placed_by_lines = kind in ("platform", "walking_area") or key in crossed
+        if not levels[row] and placed_by_lines:
             levels[row] = (on_lines.get(key, layer_level(tags)),)
     return areas.assign(levels=levels)
 
@@ -229,20 +213,17 @@ def _poi_kind(tags):
     return "amenity"
 
 
-def _require_indoor_reads(osm):
-    """Raise a TypeError unless ``osm`` has a ``get_network`` that reads indoor
-    elements."""
-    get_network = getattr(osm, "get_network", None)
-    if (
-        get_network is None
-        or "indoor_elements" not in inspect.signature(get_network).parameters
-    ):
-        raise TypeError(
-            "read_indoor needs a pyrosm.OSM object of a pyrosm that reads indoor "
-            "elements (get_network(..., indoor_elements=True)). No pyrosm release has "
-            "them yet; install pyrosm from its main branch: "
-            'pip install "pyrosm @ git+https://github.com/pyrosm/pyrosm@main"'
-        )
+def _marker_points(shapes):
+    """A point inside each of ``shapes`` (a GeoSeries) for its marker. Lines that
+    close into an area, such as the member ways of a relation that groups them, give
+    a point inside that area, not one on its outline."""
+    values = shapes.to_numpy()
+    enclosed = shapely.build_area(values)
+    is_closed_line = (shapely.get_dimensions(values) == 1) & ~shapely.is_empty(enclosed)
+    values = np.where(is_closed_line, enclosed, values)
+    return GeoSeries(
+        shapely.point_on_surface(values), index=shapes.index, crs=shapes.crs
+    )
 
 
 def _found(frame):
@@ -261,22 +242,25 @@ def _utm_crs(frames):
     """The UTM zone at the middle of the bounds of ``frames``, which are in WGS 84."""
     bounds = np.array([frame.total_bounds for frame in frames if len(frame)])
     if not len(bounds):
-        raise ValueError("read_indoor found no indoor elements and no walking network")
+        raise ValueError("indoor_layers got no indoor elements and no walking network")
     west, south = bounds[:, :2].min(axis=0)
     east, north = bounds[:, 2:].max(axis=0)
     middle = shapely.Point((west + east) / 2, (south + north) / 2)
     return GeoSeries([middle], crs=4326).estimate_utm_crs()
 
 
-def _layer(frame, tags, keep, crs, **columns):
+def _layer(frame, tags, levels, keep, crs, **columns):
     """The rows of ``frame`` that the boolean array ``keep`` marks, in ``crs``: their
     ``id`` and ``osm_type``, a column for each of ``columns`` (a function of a row's
-    tags), their ``tags`` (dicts, from the ``tags`` of all rows) and their geometry."""
+    tags), their ``levels`` (from the ``levels`` of all rows; no column for None),
+    their ``tags`` (dicts, from the ``tags`` of all rows) and their geometry."""
     rows = np.flatnonzero(keep)
     kept = [tags[row] for row in rows]
     data = {name: frame[name].to_numpy()[rows] for name in ("id", "osm_type")}
     for name, value in columns.items():
         data[name] = [value(row) for row in kept]
+    if levels is not None:
+        data["levels"] = [levels[row] for row in rows]
     data["tags"] = kept
     geometry = frame.geometry.to_numpy()[rows]
     return GeoDataFrame(data, geometry=geometry, crs=frame.crs).to_crs(crs)

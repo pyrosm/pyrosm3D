@@ -13,14 +13,15 @@ from pyrosm3d.floors import floor_levels, floor_openings, triangles
         ("room", (1.0, 2.0), [1.0]),
         ("corridor", (0.5, 1.0, 2.0), [1.0]),
         ("shaft", (0.0, 1.0, 2.0), [0.0, 1.0, 2.0]),
-        ("room", (0.5,), []),
+        ("room", (0.5,), [0.5]),
+        ("shaft", (0.25, 0.5), [0.25, 0.5]),
         ("room", (), []),
     ],
 )
 def test_floor_levels(kind, levels, expected):
     """An area has a floor on its whole levels: on the lowest when it is a tall space
-    over several of them, on each of them when it is a shaft, on none between two
-    floors."""
+    over several of them, on each of them when it is a shaft. Without a whole level
+    its levels between two floors count in the same way."""
     assert floor_levels(kind, levels) == expected
 
 

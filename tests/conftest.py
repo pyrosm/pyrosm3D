@@ -3,7 +3,8 @@ from pathlib import Path
 import pytest
 from pyrosm import OSM, get_data
 
-from pyrosm3d import read_indoor
+from pyrosm3d import In3D
+from pyrosm3d.indoor import indoor_layers
 
 
 @pytest.fixture(scope="session")
@@ -16,8 +17,21 @@ def helsinki_indoor():
 
 
 @pytest.fixture(scope="session")
-def maunula():
-    """The indoor elements of Maunula-talo, a community centre in Helsinki with three
+def maunula_osm():
+    """pyrosm's reader of Maunula-talo, a community centre in Helsinki with three
     mapped floors."""
     path = Path(__file__).parent / "data" / "maunula.osm.pbf"
-    return read_indoor(OSM(str(path)))
+    return OSM(str(path))
+
+
+@pytest.fixture(scope="session")
+def maunula_frames(maunula_osm):
+    """The frames that the ``in3d`` accessor reads for the indoor views of
+    Maunula-talo, as the arguments of ``plot_indoor``."""
+    return In3D(maunula_osm)._indoor_frames()
+
+
+@pytest.fixture(scope="session")
+def maunula(maunula_frames):
+    """The layers of Maunula-talo that the indoor views draw."""
+    return indoor_layers(**maunula_frames)

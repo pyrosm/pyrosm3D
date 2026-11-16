@@ -4,9 +4,9 @@ import numpy as np
 import pytest
 from shapely.geometry import box
 
-from pyrosm3d import plot_indoor
-from pyrosm3d.floors import floor_levels, floor_openings
-from pyrosm3d.styles import AREA_STYLES, VIEW_MARGIN
+from pyrosm3d.figure import layers_figure, level_views
+from pyrosm3d.floors import floor_levels, floor_openings, floors_between_levels
+from pyrosm3d.styles import AREA_STYLES, VIEW_MARGIN, WALL_NAME
 from pyrosm3d.tags import crosses_area, element_keys
 
 
@@ -44,18 +44,18 @@ def test_plot_indoor_draws_maunula_talo(maunula):
     """The floors of each kind of area are plates 4 m apart, one for each area and
     floor level, that cover the areas to within the rounding of the drawn corners
     (0.01 m, so at most 0.01 m2 for a metre of outline): the lift shaft on each of
-    its three levels, the platform areas and the square that lines cross on street
-    level; no floor for level outlines or a wall mapped as an area. The square
-    reaches past the view of the other areas and is drawn, with its outline, as far
-    as the view goes. The outlines and the network are on their levels; each legend
+    its three levels, the platform areas and the two squares on street level; no
+    floor for level outlines or a wall mapped as an area. The larger square reaches
+    past the view of the other areas and is drawn, with its outline, as far as the
+    view goes. The outlines and the network are on their levels; each legend
     entry is listed once; doors and shops are markers on their levels, hidden at
     start; the vertical axis names the levels."""
-    figure = plot_indoor(maunula)
+    figure = layers_figure(maunula)
     traces = figure.data
     assert all(len(t.x) == len(t.y) == len(t.z) for t in traces)
     areas = maunula.areas
     view = _view(areas)
-    square = areas[areas["kind"] == "walking_area"].geometry.iloc[0]
+    square = areas[areas["id"] == 1250318665].geometry.iloc[0]
     assert square.area == pytest.approx(579.9, abs=0.1)
     assert square.intersection(view).area == pytest.approx(378.2, abs=0.1)
     west, _, east, _ = view.bounds
@@ -121,7 +121,7 @@ def test_plot_indoor_draws_maunula_talo(maunula):
     assert {z for z in outlines[2].z if z is not None} == {8.1}
     assert "Building outlines" not in {trace.name for trace in traces}
     rooms = replace(maunula, areas=maunula.areas[maunula.areas["kind"] != "level"])
-    outlines = [t for t in plot_indoor(rooms).data if t.name == "Building outlines"]
+    outlines = [t for t in layers_figure(rooms).data if t.name == "Building outlines"]
     assert [outline.meta["levels"] for outline in outlines] == [[0.0], [1.0], [2.0]]
     assert {z for z in outlines[1].z if z is not None} == {4.1}
     assert {outline.hoverinfo for outline in outlines} == {"skip"}
@@ -158,7 +158,7 @@ def test_plot_indoor_draws_one_level(maunula):
     edges = maunula.edges.copy()
     row = edges.index[(edges["u_level"] == 1) & (edges["v_level"] == 1)][0]
     edges.loc[row, ["u_level", "v_level"]] = 0.5
-    figure = plot_indoor(replace(maunula, doors=doors, edges=edges), level=1)
+    figure = layers_figure(replace(maunula, doors=doors, edges=edges), level=1)
     assert all(1.0 in trace.meta["levels"] for trace in figure.data)
     names = [trace.name for trace in figure.data]
     assert "Rooms" in names and "Toilets" in names
@@ -169,7 +169,42 @@ def test_plot_indoor_draws_one_level(maunula):
     axis = figure.layout.scene.zaxis
     assert (tuple(axis.range), axis.ticktext) == ((1.0, 6.0), ("1",))
     with pytest.raises(ValueError, match="nothing to draw on level 5"):
-        plot_indoor(maunula, level=5)
+        layers_figure(maunula, level=5)
+
+
+def test_plot_indoor_draws_a_floor_between_two_levels(maunula):
+    """A room whose only level is between two floors has its floor, outline and walls
+    at its own height; a door there is a marker and an edge there is shown on that
+    level only. The level is labelled on the vertical axis, has a view of its own and
+    can be drawn alone."""
+    areas = maunula.areas.copy()
+    on_first = areas["levels"].map(lambda levels: levels == (1.0,))
+    room = areas.index[(areas["kind"] == "room") & on_first][0]
+    areas["levels"] = [
+        (0.5,) if row == room else levels
+        for row, levels in zip(areas.index, areas["levels"])
+    ]
+    door_on_first = maunula.doors["levels"].map(lambda levels: levels == (1.0,))
+    doors = maunula.doors[door_on_first].iloc[:1].assign(levels=[(0.5,)])
+    edges = maunula.edges.copy()
+    edge = edges.index[(edges["u_level"] == 1) & (edges["v_level"] == 1)][0]
+    edges.loc[edge, ["u_level", "v_level"]] = 0.5
+    changed = replace(maunula, areas=areas, doors=doors, edges=edges)
+    assert floors_between_levels(areas) == {0.5}
+    figure = layers_figure(changed)
+    on_half = [trace for trace in figure.data if trace.meta["levels"] == [0.5]]
+    names = {trace.name for trace in on_half}
+    drawn = {"Rooms", "Room and corridor outlines", WALL_NAME, "Doors and entrances"}
+    assert drawn < names and len(names) == len(drawn) + 1  # and the edge
+    (floor,) = [trace for trace in on_half if trace.name == "Rooms"]
+    assert set(floor.z) == {2.0}
+    assert all(0.5 not in trace.meta["levels"][:-1] for trace in figure.data)
+    assert "0.5" in figure.layout.scene.zaxis.ticktext
+    views = level_views(figure)
+    assert list(views) == [0.0, 0.5, 1.0, 2.0]
+    assert views[0.5]["scene.zaxis.ticktext"] == ["0.5"]
+    alone = layers_figure(changed, level=0.5)
+    assert {trace.name for trace in alone.data} == names
 
 
 def test_plot_indoor_opens_floors_for_stairs(maunula):
@@ -194,8 +229,8 @@ def test_plot_indoor_opens_floors_for_stairs(maunula):
         floors = [t for t in figure.data if t.type == "mesh3d"]
         return sum(_floor_area(t) for t in floors if t.meta["levels"] == [2.0])
 
-    closed = second_floor(plot_indoor(maunula))
-    opened = second_floor(plot_indoor(replace(maunula, edges=edges)))
+    closed = second_floor(layers_figure(maunula))
+    opened = second_floor(layers_figure(replace(maunula, edges=edges)))
     assert closed - opened == pytest.approx(taken, rel=0.01)
 
 
@@ -205,7 +240,7 @@ def test_plot_indoor_draws_platform_lines_without_a_floor(maunula):
     as a "Platforms" line; without the floor it is, where it reaches the view."""
     areas, edges = maunula.areas, maunula.edges
     no_floors = replace(maunula, areas=areas[areas["kind"] != "platform"])
-    lines = [t for t in plot_indoor(no_floors).data if t.name == "Platforms"]
+    lines = [t for t in layers_figure(no_floors).data if t.name == "Platforms"]
     assert [line.meta["levels"] for line in lines] == [[0.0]]
     platforms = set(element_keys(areas[areas["kind"] == "platform"]))
     of_platform = np.array([key in platforms for key in element_keys(edges)])
@@ -213,7 +248,7 @@ def test_plot_indoor_draws_platform_lines_without_a_floor(maunula):
     assert len(outlines) == 27
     in_view = outlines[outlines.intersects(_view(no_floors.areas))]
     assert _line_length(lines[0]) == pytest.approx(in_view.length.sum(), abs=0.5)
-    assert "Platforms" not in {trace.name for trace in plot_indoor(maunula).data}
+    assert "Platforms" not in {trace.name for trace in layers_figure(maunula).data}
 
 
 def test_plot_indoor_view_follows_the_other_areas(maunula):
@@ -223,17 +258,18 @@ def test_plot_indoor_view_follows_the_other_areas(maunula):
     areas = maunula.areas
     is_square = areas["kind"] == "walking_area"
     far = areas.assign(geometry=areas.geometry.where(~is_square, areas.translate(5000)))
-    figure = plot_indoor(replace(maunula, areas=far))
+    figure = layers_figure(replace(maunula, areas=far))
     assert "Walking areas" not in {trace.name for trace in figure.data}
     assert all(len(t.x) == len(t.y) == len(t.z) for t in figure.data)
-    unmoved = plot_indoor(maunula)
+    unmoved = layers_figure(maunula)
     assert figure.layout.scene.xaxis.range == unmoved.layout.scene.xaxis.range
 
-    figure = plot_indoor(replace(maunula, areas=areas[is_square]))
+    figure = layers_figure(replace(maunula, areas=areas[is_square]))
     (floor,) = [trace for trace in figure.data if trace.name == "Walking areas"]
-    square = areas[is_square].geometry.iloc[0]
-    assert _floor_area(floor) == pytest.approx(square.area, abs=0.01 * square.length)
-    west, _, east, _ = square.bounds
+    squares = areas[is_square].geometry
+    outline = squares.length.sum()
+    assert _floor_area(floor) == pytest.approx(squares.area.sum(), abs=0.01 * outline)
+    west, _, east, _ = squares.total_bounds
     axis = figure.layout.scene.xaxis
     assert axis.range[1] - axis.range[0] == pytest.approx(east - west + 2 * VIEW_MARGIN)
 
@@ -243,15 +279,15 @@ def test_plot_indoor_without_areas(maunula):
     drawn, unless it lies outside the view; without a network too there is nothing to
     draw."""
     no_areas = replace(maunula, areas=maunula.areas.iloc[:0])
-    figure = plot_indoor(no_areas)
+    figure = layers_figure(no_areas)
     meshes = [trace.name for trace in figure.data if trace.type == "mesh3d"]
     assert meshes == ["Walls (rooms and indoor=wall)"]
     far = maunula.walls.assign(levels=[(7.0,)])
     far.geometry = far.translate(5000, 0)
-    figure = plot_indoor(replace(no_areas, walls=far))
+    figure = layers_figure(replace(no_areas, walls=far))
     assert {trace.type for trace in figure.data} == {"scatter3d"}
     with pytest.raises(ValueError, match="nothing to draw on level 7"):
-        plot_indoor(replace(maunula, walls=far), level=7)
+        layers_figure(replace(maunula, walls=far), level=7)
     assert "Walkways at street level" in [trace.name for trace in figure.data]
     with pytest.raises(ValueError, match="no areas and no network"):
-        plot_indoor(replace(no_areas, edges=maunula.edges.iloc[:0]))
+        layers_figure(replace(no_areas, edges=maunula.edges.iloc[:0]))

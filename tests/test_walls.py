@@ -51,12 +51,14 @@ def test_wall_panels_leave_gaps_at_doors():
         ("room", (0.0, 2.0), {0.0: 4.0, 1.0: 4.0, 2.0: 1.6}),
         ("shaft", (0.0, 1.0, 2.0), {0.0: 1.6, 1.0: 1.6, 2.0: 1.6}),
         ("room", (0.5, 1.0), {1.0: 1.6}),
+        ("room", (0.5,), {0.5: 1.6}),
         ("room", (0.0, 1000.0), {0.0: 1.6, 1000.0: 1.6}),
         ("room", (), {}),
     ],
 )
 def test_room_wall_heights(kind, levels, expected):
-    """A room has cut-away walls on its whole levels. A tall room has full walls on
+    """A room has cut-away walls on its whole levels, or on the level of its floor
+    when none of its levels is whole. A tall room has full walls on
     every level below its highest, also on a level that its level list leaves out; a
     shaft, and a room whose levels are further apart than a building has floors, do
     not."""

@@ -1,15 +1,16 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from shapely.geometry import box
 
-from pyrosm3d import plot_indoor, to_html
-from pyrosm3d.figure import level_views
-from pyrosm3d.page import _element_notes
+from pyrosm3d.figure import _view_box, layers_figure, level_views
+from pyrosm3d.page import _element_notes, layers_page
 from pyrosm3d.styles import AREA_STYLES
 
 
@@ -48,7 +49,8 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     in the tags panel, over what the element is and its level. A legend entry cannot
     be shown alone with a double click. A
     button for all levels and one for each level, named by its number over the number
-    of areas on it (0 on a level that has only a wall), show the traces of that level,
+    of areas on it (0 on a level that has only a wall; a level between two floors that
+    a room has its floor on has a button too), show the traces of that level,
     drawn
     or switched off as in the figure, list each legend entry once and set the vertical
     axis as plot_indoor does for the level. A click on a legend entry switches it off
@@ -64,7 +66,7 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     hostile = "</ScRiPt><script>alert(1)</script>"
     named = [{**tags, "name": hostile} for tags in maunula.areas["tags"]]
     maunula = replace(maunula, areas=maunula.areas.assign(tags=named))
-    path = to_html(
+    path = layers_page(
         maunula, tmp_path / "maunula.html", "Maunula-talo <3D>", include_plotlyjs=False
     )
     page = path.read_text(encoding="utf-8")
@@ -76,27 +78,35 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     used = ('id="levels"', 'id="legend"', 'id="page-data"', 'id="tags"')
     for used_by_the_script in used:
         assert page.index(used_by_the_script) < plotted
-    online = to_html(maunula, tmp_path / "cdn.html", include_plotlyjs="cdn")
+    online = layers_page(maunula, tmp_path / "cdn.html", include_plotlyjs="cdn")
     assert "cdn.plot.ly" in online.read_text(encoding="utf-8")
 
-    figure = plot_indoor(maunula)
+    figure = layers_figure(maunula)
     shown = _run_page(path, "Rooms", "Rooms")
     assert shown["buttons"] == ["All levels", "0", "1", "2"]
     floors = maunula.areas[maunula.areas["kind"].isin(list(AREA_STYLES))]
     counts = [sum(level in on for on in floors["levels"]) for level in (0.0, 1.0, 2.0)]
-    assert counts[0] == 6  # four platforms, the square and the lift
+    assert counts[0] == 7  # four platforms, the two squares and the lift
     names = ["Level %d, %d areas" % (level, count) for level, count in enumerate(counts)]
     assert shown["names"] == ["All levels"] + names
     assert shown["counts"] == [[]] + [["small %d" % count] for count in counts]
     wall_above = maunula.walls.assign(levels=[(7.0,)])
-    path_above = to_html(
-        replace(maunula, walls=wall_above),
+    rooms = maunula.areas["kind"] == "room"
+    between = maunula.areas.assign(
+        levels=[
+            (0.5,) if row == maunula.areas.index[rooms][0] else levels
+            for row, levels in zip(maunula.areas.index, maunula.areas["levels"])
+        ]
+    )
+    path_above = layers_page(
+        replace(maunula, walls=wall_above, areas=between),
         tmp_path / "above.html",
         include_plotlyjs=False,
     )
     above = _run_page(path_above, "Rooms", "Rooms")
     assert (above["buttons"][-1], above["names"][-1]) == ("7", "Level 7, 0 areas")
     assert above["counts"][-1] == ["small 0"]
+    assert (above["buttons"][2], above["names"][2]) == ("0.5", "Level 0.5, 1 area")
     views = level_views(figure)
     for button, level in zip(shown["buttons"], [None, 0.0, 1.0, 2.0]):
         view = shown["views"][button]
@@ -156,6 +166,33 @@ def test_to_html_writes_a_page_with_level_buttons_and_tags(maunula, tmp_path):
     assert touches["distances"] == pytest.approx([4, 2, 2, 2, 4, 4, 4])
     assert touches["pans"] == [[0, pytest.approx(0.2), 0], [0, 0, 0]]
     assert touches["saves"] == [1, 1, 1, 2]
+
+
+def test_level_counts_leave_out_areas_outside_the_view(maunula, tmp_path):
+    """The count on a level's button holds the areas that the figure draws: a walking
+    area that lies outside the view of the other areas, or only touches its edge, is
+    not counted and has no floor and no outline."""
+    areas = maunula.areas
+    is_square = areas["id"] == 674689752
+    _, south, east, _ = _view_box(maunula)
+    beside_the_view = box(east, south, east + 10, south + 10)
+    moved = {
+        "near": areas.geometry,
+        "far": areas.geometry.where(~is_square, areas.translate(5000)),
+        "touching": areas.geometry.where(~is_square, beside_the_view),
+    }
+    counts, drawn = {}, {}
+    for name, geometry in moved.items():
+        layers = replace(maunula, areas=areas.assign(geometry=geometry))
+        path = layers_page(layers, tmp_path / (name + ".html"), include_plotlyjs="cdn")
+        page = path.read_text(encoding="utf-8")
+        data = json.loads(re.search(r'id="page-data">(.*?)</script>', page, re.S)[1])
+        counts[name] = dict(zip(data["levels"], data["counts"]))
+        figure = layers_figure(layers)
+        drawn[name] = [(trace.name, len(trace.x)) for trace in figure.data]
+    assert counts["near"][0.0] == 7  # four platforms, the two squares and the lift
+    assert counts["far"] == counts["touching"] == {**counts["near"], 0.0: 6}
+    assert drawn["far"] == drawn["touching"] != drawn["near"]
 
 
 def test_element_notes_of_maunula_talo(maunula):

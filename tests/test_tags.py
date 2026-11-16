@@ -4,7 +4,7 @@ import pytest
 from geopandas import GeoDataFrame
 from shapely.geometry import Point
 
-from pyrosm3d.tags import float_column, level_ranges, row_tags, tag_layer, tag_levels
+from pyrosm3d.tags import float_column, level_ranges, row_tags, tag_layer
 
 
 def test_row_tags_of_a_network_read(helsinki_indoor):
@@ -131,28 +131,6 @@ def test_level_ranges(value, expected):
     are not a level are skipped; a value without a level, or a missing one, gives
     None."""
     assert level_ranges(value) == expected
-
-
-@pytest.mark.parametrize(
-    "level, expected",
-    [
-        ("0-2", (0.0, 1.0, 2.0)),
-        ("1;2", (1.0, 2.0)),
-        ("-1;1", (-1.0, 1.0)),
-        ("0.5-2.5", (0.5, 1.0, 2.0, 2.5)),
-        ("0.5", (0.5,)),
-        ("0-200", tuple(map(float, range(201)))),
-        ("1;0-201", (1.0,)),
-        ("0-1000000000", ()),
-        ("ground", ()),
-        (None, ()),
-    ],
-)
-def test_tag_levels(level, expected):
-    """An element is on the ends of each range of its level tag and on the whole
-    levels between them; a range over more than 200 levels gives none; without a
-    level it is on none."""
-    assert tag_levels({} if level is None else {"level": level}) == expected
 
 
 @pytest.mark.parametrize(

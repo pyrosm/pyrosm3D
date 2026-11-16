@@ -7,7 +7,7 @@ import pandas as pd
 import shapely
 from shapely.ops import substring
 
-from pyrosm3d.styles import LANDING, OPENING_WIDTHS
+from pyrosm3d.styles import AREA_STYLES, LANDING, OPENING_WIDTHS
 from pyrosm3d.tags import _MAX_LEVEL_SPAN, float_column
 
 # An edge shorter than this, or a part of one, opens no floor (metres)
@@ -17,12 +17,28 @@ _SHORTEST_OPENING = 0.1
 
 def floor_levels(kind, levels):
     """The levels on which an area of ``kind`` that is on ``levels`` (sorted) has a
-    floor: its whole levels. An area on two or more of them is one tall space with its
-    floor on the lowest, unless it is a shaft, which has a floor on each."""
+    floor: its whole levels, or, when none of its levels is whole, its levels as they
+    are (a mezzanine tagged ``level=0.5``). An area on two or more of them is one tall
+    space with its floor on the lowest, unless it is a shaft, which has a floor on
+    each."""
     whole = [level for level in levels if float(level).is_integer()]
+    floors = whole or list(levels)
     if kind == "shaft":
-        return whole
-    return whole[:1]
+        return floors
+    return floors[:1]
+
+
+def floors_between_levels(areas):
+    """The levels that are not whole on which one of the ``areas`` (a layer of an
+    IndoorLayers) of a kind in ``AREA_STYLES`` has its floor (see
+    :func:`floor_levels`), as a set."""
+    return {
+        level
+        for kind, levels in zip(areas["kind"], areas["levels"])
+        if kind in AREA_STYLES
+        for level in floor_levels(kind, levels)
+        if not float(level).is_integer()
+    }
 
 
 def floor_openings(edges):
