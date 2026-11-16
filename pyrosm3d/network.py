@@ -7,10 +7,14 @@ that hides or shows it.
 A walkway tagged with several levels is drawn flat at the lowest, dotted; an edge
 without a level at its layer when that is below street level (a tunnel at least one
 below), else at street level. The vertical axis counts OSM levels, not metres.
+An edge of a simplified graph that joins several ways is drawn way by way (see
+:func:`_edges_by_way`).
 
 With a terrain model the edges are drawn at heights in metres instead, those of
 :func:`pyrosm3d.heights.network_heights`.
 """
+
+import itertools
 
 import numpy as np
 import pandas as pd
@@ -22,6 +26,7 @@ from pyrosm3d.dem import sample_dem
 from pyrosm3d.tags import (
     crosses_area,
     float_column,
+    is_missing,
     is_platform,
     layer_level,
     level_ranges,
@@ -53,6 +58,8 @@ EDGE_NAMES = {
     "platform": "platform",
     "crossing": "line across an area",
 }
+# Metres in a degree of latitude
+_METRES_PER_DEGREE = 111_195.0
 # The route: red, wide and solid, drawn over the edges; the escalators are amber so that
 # they stay apart from it
 _ROUTE_COLOUR = "#e8002d"
@@ -107,6 +114,108 @@ def _graph_frames(graph):
     return edges, None
 
 
+def _edges_by_way(edges):
+    """``(edges, chains)``: the ``edges`` of a graph (see :func:`_graph_frames`) with
+    each edge that joins several ways split into parts that have the values of one way.
+
+    A simplified graph of get_graph holds a list in a cell of such an edge where its
+    ways differ, with a value for each segment of the edge's line from ``u`` to ``v``.
+    A part is a run of segments with the same values: it has those values, the line of
+    its segments, its share of the ``length`` and, where it meets the next part, a new
+    node id below zero and below every id of the edges. ``chains`` holds the nodes
+    along each split edge, ``{(u, v): [u, ..., v]}``.
+
+    An edge that climbs from one level to another is kept whole. A list of another
+    length and a list of booleans (networkx's ``oneway`` and ``reversed`` hold the
+    different values of the ways, not one for each segment) do not split an edge.
+    :func:`pyrosm3d.tags.row_tags` joins the values of the lists that are left."""
+    geometry = edges.geometry.name
+    listed = np.zeros(len(edges), dtype=bool)
+    for column in edges.columns.drop(geometry):
+        if edges[column].dtype == object:
+            listed |= edges[column].map(type).eq(list).to_numpy()
+    u_level, v_level = (float_column(edges, col) for col in ("u_level", "v_level"))
+    climbs = np.isfinite(u_level) & np.isfinite(v_level) & (u_level != v_level)
+    lowest = pd.to_numeric(edges[["u", "v"]].stack(), errors="coerce").min()
+    spare = itertools.count(int(min(0, lowest)) - 1, -1)
+    parts, chains, split = [], {}, []
+    for row in np.flatnonzero(listed & ~climbs).tolist():
+        edge = edges.iloc[row].to_dict()
+        points = shapely.get_coordinates(edge[geometry])
+        count = len(points) - 1
+        lists = {
+            column: cell
+            for column, cell in edge.items()
+            if isinstance(cell, list)
+            and len(cell) == count
+            and not all(isinstance(value, (bool, np.bool_)) for value in cell)
+        }
+        if not lists:
+            continue
+        starts = [0] + [
+            i
+            for i in range(1, count)
+            if any(_differ(cell[i - 1], cell[i]) for cell in lists.values())
+        ]
+        nodes = [edge["u"], *itertools.islice(spare, len(starts) - 1), edge["v"]]
+        along = _along_lines(points, np.zeros(len(points), dtype=int), 1)[2]
+        for part, (start, stop) in enumerate(zip(starts, starts[1:] + [count])):
+            values = {column: cell[start] for column, cell in lists.items()}
+            line = shapely.LineString(points[start : stop + 1])
+            ends = {"u": nodes[part], "v": nodes[part + 1], geometry: line}
+            if "length" in edge:
+                ends["length"] = edge["length"] * (along[stop] - along[start])
+            parts.append({**edge, **values, **ends})
+        chains[(edge["u"], edge["v"])] = nodes
+        split.append(row)
+    if not split:
+        return edges, chains
+    parts = GeoDataFrame(parts, geometry=geometry, crs=edges.crs)
+    whole = edges.drop(index=edges.index[split])
+    return pd.concat([whole, parts], ignore_index=True), chains
+
+
+def _along_lines(lonlat, edge_of, count):
+    """``(first, last, along, lengths)`` of ``count`` lines with the vertices ``lonlat``
+    (``edge_of`` names each vertex's line): the positions of each line's first and last
+    vertex, for each vertex how far along its line it lies (0 at the first vertex, 1 at
+    the last; by position in a line without length, such as a lift), and each line's
+    length in metres."""
+    counts = np.bincount(edge_of, minlength=count)
+    last = np.cumsum(counts) - 1
+    first = last - counts + 1
+    # East along the shorter way round, also across the 180th meridian
+    east = (np.diff(lonlat[:, 0]) + 180.0) % 360.0 - 180.0
+    east *= _METRES_PER_DEGREE * np.cos(np.radians(lonlat[1:, 1]))
+    steps = np.hypot(east, np.diff(lonlat[:, 1]) * _METRES_PER_DEGREE)
+    steps = np.r_[0.0, steps]
+    steps[first] = 0.0
+    run = np.cumsum(steps)
+    run -= run[first][edge_of]
+    lengths = run[last]
+    total = lengths[edge_of]
+    place = (np.arange(len(lonlat)) - first[edge_of]) / (counts[edge_of] - 1)
+    along = np.where(total > 0, run / np.where(total > 0, total, 1.0), place)
+    return first, last, along, lengths
+
+
+def _differ(value, other):
+    """Whether two values of a cell differ; two missing values do not."""
+    if is_missing(value) or is_missing(other):
+        return not (is_missing(value) and is_missing(other))
+    return value != other
+
+
+def _along_parts(route, chains):
+    """The ``route`` (node ids) with the nodes between the parts of each split edge
+    that it runs along, either way (``chains`` of :func:`_edges_by_way`)."""
+    nodes = list(route[:1])
+    for a, b in zip(route[:-1], route[1:]):
+        between = chains.get((a, b)) or chains.get((b, a), [])[::-1]
+        nodes += [*between[1:-1], b]
+    return nodes
+
+
 def _edge_kind(tags, vertical, u_level, v_level, crossing):
     """``(kind, z at u, z at v)`` of an edge with the OSM ``tags``, ``vertical`` value
     and end levels."""
@@ -150,10 +259,13 @@ def _edge_text(row, tags, kind, level_u, level_v):
     """The hover text of an edge: its name (else the legend's name of its ``kind``),
     its element with its ``highway`` value (else its ``kind``), and the levels that
     it is drawn at."""
+    element, ids = getattr(row, "osm_type", "way"), getattr(row, "id", "")
+    if isinstance(ids, list):  # an edge that joins several ways and is kept whole
+        element, ids = element + "s", ", ".join(dict.fromkeys(map(str, ids)))
     return "%s<br>%s %s · %s<br>%s" % (
         tags.get("name") or _STYLES[kind][0],
-        getattr(row, "osm_type", "way"),
-        getattr(row, "id", ""),
+        element,
+        ids,
         tags.get("highway", kind),
         end_levels_text(level_u, level_v),
     )
@@ -230,7 +342,9 @@ def plot_network(
     ----------
     edges : GeoDataFrame, igraph.Graph or networkx.MultiDiGraph
         The edges of ``get_network(..., nodes=True, indoor_elements=True)``, or a graph
-        of ``get_graph(indoor_elements=True)`` (igraph or networkx).
+        of ``get_graph(indoor_elements=True)`` (igraph or networkx). An edge of a
+        simplified graph that joins several ways is drawn way by way, each part with
+        the tags of its way.
     nodes : GeoDataFrame (optional)
         The nodes of the same read: their station entrances (``railway`` tagged
         ``subway_entrance`` or ``train_station_entrance``) are drawn as markers, and the
@@ -274,11 +388,15 @@ def plot_network(
             "plot_network draws areas at their levels, not at heights in metres: "
             "give areas or dem, not both."
         )
-    if not isinstance(edges, GeoDataFrame):
+    is_graph = not isinstance(edges, GeoDataFrame)
+    if is_graph:
         edges, graph_nodes = _graph_frames(edges)
         nodes = graph_nodes if nodes is None else nodes
     if edges.empty:
         raise ValueError("plot_network got no edges to draw.")
+    if is_graph:
+        edges, chains = _edges_by_way(edges)
+        route = route if route is None else _along_parts(route, chains)
     if in_metres:
         from pyrosm3d.heights import network_heights  # it imports this module
 

@@ -55,7 +55,9 @@ def row_tags(frame):
     """The OSM tags of each row of ``frame``, a GeoDataFrame read with pyrosm, as a list
     of dicts: the values of its tag columns (see :func:`_tag_columns`) and of its JSON
     ``tags`` column, as the strings OSM stores. A missing value removes the tag of its
-    column, also when the JSON holds it."""
+    column, also when the JSON holds it. A cell that holds a list, as an edge of a
+    simplified graph that joins ways with different values has, gives the different
+    values of the list as one value (see :func:`_joined_values`)."""
     columns = _tag_columns(frame)
     keys = [_tag_key(column) for column in columns]
     tags = [{} for _ in range(len(frame))]
@@ -64,6 +66,10 @@ def row_tags(frame):
         present = values.notna().to_numpy()
         rows = np.flatnonzero(present).tolist()
         for row, value in zip(rows, _scalars(values[present])):
+            if isinstance(value, list):
+                value = _joined_values(value)
+                if value is None:
+                    continue
             tags[row][key] = _tag_text(value)
     if "tags" not in frame.columns:
         return tags
@@ -151,31 +157,54 @@ def _tag_text(value):
     return str(value)
 
 
-def _is_missing(value):
+def is_missing(value):
     """Whether a tag value is missing: None, NaN, ``pd.NA`` or ``pd.NaT``."""
     if value is None or value is pd.NA or value is pd.NaT:
         return True
     return isinstance(value, (float, np.floating)) and math.isnan(value)
 
 
+def _joined_values(values):
+    """The different ``values`` that are not missing as one tag value: the strings OSM
+    stores, in their order, joined with semicolons, as OSM writes several values of a
+    key; None when every value is missing."""
+    texts = dict.fromkeys(_tag_text(value) for value in values if not is_missing(value))
+    return ";".join(texts) or None
+
+
 def _with_json_tags(tags, json_tags, column_keys):
-    """``tags`` with the tags of the JSON dict (or string) ``json_tags`` added, keeping
-    the values ``tags`` already has and leaving out the keys of the tag columns
-    (``column_keys``) and the element fields."""
+    """``tags`` with the tags of ``json_tags`` added (see :func:`_json_tags`), without
+    the keys of the tag columns (``column_keys``). A list of JSON tags, those of the
+    ways that an edge of a simplified graph joins, gives each key the different values
+    of the ways as one value (see :func:`_joined_values`)."""
+    if not isinstance(json_tags, list):
+        tags.update(_json_tags(json_tags, column_keys))
+        return tags
+    ways = [_json_tags(way_tags, column_keys) for way_tags in json_tags]
+    for key in dict.fromkeys(key for way in ways for key in way):
+        tags[key] = _joined_values(way.get(key) for way in ways)
+    return tags
+
+
+def _json_tags(json_tags, column_keys):
+    """The tags of the JSON dict (or string) ``json_tags`` as strings, without the keys
+    of the tag columns (``column_keys``), the element fields and the missing values;
+    none for a string that is not JSON or for a value that is not a dict."""
     if isinstance(json_tags, str):
         try:
             json_tags = json.loads(json_tags)
         except ValueError:
-            return tags
+            return {}
     if not isinstance(json_tags, dict):
-        return tags
+        return {}
+    tags = {}
     for name, value in json_tags.items():
         key = _tag_key(name)
         if key is None or key in tags or key in column_keys:
             continue
         if str(name) in _JSON_FIELDS and not isinstance(value, str):
             continue
-        if _is_missing(value):
+        if is_missing(value):
             continue
         tags[key] = _tag_text(value)
     return tags
@@ -204,7 +233,7 @@ def level_ranges(value):
     (0.0, 0.0)]`` and ``"0-2"`` gives ``[(0.0, 2.0)]``. Parts that are not a level or a
     range, or whose number is too large for a float, are skipped; None when no part
     is left."""
-    if _is_missing(value):
+    if is_missing(value):
         return None
     ranges = []
     for part in str(value).split(";"):

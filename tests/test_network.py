@@ -5,7 +5,13 @@ from shapely.geometry import LineString, Point
 
 from pyrosm3d import network_heights, plot_network
 from pyrosm3d.dem import sample_dem
-from pyrosm3d.network import _STYLES, _edge_kind, _edge_text, _graph_frames
+from pyrosm3d.network import (
+    _STYLES,
+    _edge_kind,
+    _edge_text,
+    _edges_by_way,
+    _graph_frames,
+)
 
 
 def _traces(figure):
@@ -141,15 +147,48 @@ def test_plot_network_puts_an_entrance_on_its_edge_in_metres():
 @pytest.mark.parametrize("graph_type", ["networkx", "igraph"])
 def test_plot_network_draws_graphs(helsinki_indoor, graph_type):
     """A graph of get_graph(indoor_elements=True) draws the same kinds as its frames,
-    each edge of the walking graph once, though the graph has it in both directions."""
+    each edge of the walking graph once, though the graph has it in both directions.
+
+    The graph is simplified, and an edge that joins several ways is drawn way by way.
+    The edge from node 1514631272 to 173248856 joins a segment of the footway 16759160
+    and two of the footway 16759161, a tunnel on layer -1: a route along it runs at
+    street level and then on level -1. The edge from 3929024819 to 189433503 joins
+    Vilhonkatu (way 29498962) and Rautatientori (ways 4247505 and 34732049). The edge
+    from 946518188 to 946518151 turns a corner between its two ways: its parts are as
+    long as the ways' segments are in the graph without simplification, 17.63 m and
+    32.02 m."""
     osm, _, _ = helsinki_indoor
     graph = osm.get_graph(
         "walking", graph_type=graph_type, indoor_elements=True, retain_all=True
     )
-    traces = _traces(plot_network(graph, center=(24.9415, 60.1712), radius=200))
+    tunnel_edge = (1514631272, 173248856)
+    figure = plot_network(
+        graph, center=(24.9415, 60.1712), radius=200, route=list(tunnel_edge)
+    )
+    traces = _traces(figure)
     assert {"Escalators", "Lifts", "Platforms", "Station entrances"} <= set(traces)
     n_edges = graph.ecount() if graph_type == "igraph" else graph.number_of_edges()
-    assert len(_graph_frames(graph)[0]) * 2 == n_edges
+    merged = _graph_frames(graph)[0]
+    assert len(merged) * 2 == n_edges
+    assert list(traces["Route"].z) == [0, 0, None, -1, -1, -1, None]
+    assert (
+        "Walkways on other levels<br>way 16759161 · footway<br>level -1"
+        in traces["Walkways on other levels"].text
+    )
+    assert {
+        "Vilhonkatu<br>way 29498962 · unclassified<br>level 0",
+        "Rautatientori<br>way 4247505 · unclassified<br>level 0",
+        "Rautatientori<br>way 34732049 · unclassified<br>level 0",
+    } <= set(traces["Walkways at street level"].text)
+    edges, chains = _edges_by_way(merged)
+    first, between, last = chains[tunnel_edge]
+    assert (first, last) == tunnel_edge and between < merged[["u", "v"]].min().min()
+    parts = edges[(edges["u"] == between) | (edges["v"] == between)]
+    assert parts["id"].tolist() == [16759160, 16759161]
+    _, corner, _ = chains[(946518188, 946518151)]
+    parts = edges[(edges["u"] == corner) | (edges["v"] == corner)]
+    assert parts["id"].tolist() == [81239432, 81239444]
+    assert parts["length"].tolist() == pytest.approx([17.63, 32.02], abs=0.01)
 
 
 def test_plot_network_draws_a_graph_made_by_hand():
@@ -187,6 +226,88 @@ def test_plot_network_draws_a_graph_made_by_hand():
     assert list(traces["Walkways at street level"].z) == [0, 0.1, None, 0.1, 1.0, None]
     assert list(traces["Platforms"].z) == [0, 0.1, None]
     assert list(traces["Station entrances"].z) == [0]
+
+
+def test_plot_network_draws_merged_edges_made_by_hand():
+    """A networkx graph made by hand, with lists as a simplified graph has them.
+
+    The edge from node 1 to 2 has a value for each of its four segments: a street
+    (way 10), two segments of a tunnel on layer -2 (way 11) and a street (way 12). It
+    is drawn in three parts with new nodes below every node id, and a route runs along
+    them, here against the edge. With a terrain model of 10 m in the west, 14 m in the
+    east and a hill of 100 m above the middle of the tunnel, the tunnel runs straight
+    from 10 m to 14 m.
+
+    Two edges are kept whole. The stairs from node 2 to 3 climb from level 0 to 1:
+    the hover text names both ways and both names. The edge from node 3 to -5 has two
+    segments, the two booleans of ``reversed`` and a list of three names: neither list
+    splits it."""
+    import networkx as nx
+
+    def line(*east):
+        return LineString([(24.94 + step * 1e-3, 60.17) for step in east])
+
+    graph = nx.MultiDiGraph()
+    graph.add_edge(
+        1,
+        2,
+        geometry=line(0, 1, 1.5, 2, 3),
+        id=[10, 11, 11, 12],
+        name=["A", np.nan, None, "A"],
+        tunnel=[None, "yes", "yes", np.nan],
+        tags=[np.nan, '{"layer":"-2"}', '{"layer":"-2"}', np.nan],
+    )
+    graph.add_edge(
+        2,
+        3,
+        geometry=line(3, 4, 5),
+        id=[13, 14],
+        name=["B", "C"],
+        tags=['{"handrail":"yes"}', '{"handrail":"no"}'],
+        u_level=0.0,
+        v_level=1.0,
+        vertical="stairs",
+    )
+    graph.add_edge(
+        3,
+        -5,
+        geometry=line(5, 6, 7),
+        id=15,
+        reversed=[False, True],
+        name=["X", "Y", "Z"],
+    )
+    edges, chains = _edges_by_way(_graph_frames(graph)[0])
+    assert chains == {(1, 2): [1, -6, -7, 2]}
+    assert sorted(zip(edges["u"], edges["v"])) == [
+        (-7, 2),
+        (-6, -7),
+        (1, -6),
+        (2, 3),
+        (3, -5),
+    ]
+    traces = _traces(plot_network(graph, route=[-5, 3, 2, 1]))
+    assert set(traces["Walkways at street level"].text) - {None} == {
+        "A<br>way 10 · street<br>level 0",
+        "A<br>way 12 · street<br>level 0",
+        "X;Y;Z<br>way 15 · street<br>level 0",
+    }
+    assert set(traces["Walkways on other levels"].text) - {None} == {
+        "Walkways on other levels<br>way 11 · levels<br>level -2"
+    }
+    assert set(traces["Stairs"].text) - {None} == {
+        "B;C<br>ways 13, 14 · stairs<br>levels 0 → 1"
+    }
+    along = [0, 0, 0, None, 1, 0.5, 0, None]  # the street and the stairs
+    along += [0, 0, None, -2, -2, -2, None, 0, 0, None]  # ways 12, 11 and 10
+    assert list(traces["Route"].z) == along
+
+    def hill(longitudes, latitudes):
+        east = (longitudes - 24.94) * 1e3
+        return np.where(east < 1.2, 10.0, np.where(east < 1.8, 100.0, 14.0))
+
+    in_metres = _traces(plot_network(graph, dem=hill))
+    tunnel = in_metres["Walkways on other levels"].z
+    assert list(tunnel) == pytest.approx([10, 12, 14, None], abs=0.01)
 
 
 def test_plot_network_refuses_what_it_cannot_draw():
