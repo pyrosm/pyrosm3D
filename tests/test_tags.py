@@ -82,6 +82,26 @@ def test_row_tags_of_a_frame_made_by_hand():
     ]
 
 
+def test_row_tags_joins_the_values_of_lists():
+    """A cell that holds a list, as an edge of a simplified graph that joins several
+    ways has, gives its different values in their order, joined with semicolons and
+    without the missing ones; a list of missing values gives no tag. A list of JSON
+    tags gives each key the different values of its dicts."""
+    frame = GeoDataFrame(
+        {
+            "name": [["A", np.nan, "B", "A"]],
+            "tunnel": [[None, np.nan]],
+            "lanes": [[2, 2.0, None]],
+            "tags": [['{"layer":"-1","name":"x"}', np.nan, '{"layer":"-2","lit":"no"}']],
+        },
+        geometry=[Point(0, 0)],
+        crs=4326,
+    )
+    assert row_tags(frame) == [
+        {"name": "A;B", "lanes": "2", "layer": "-1;-2", "lit": "no"}
+    ]
+
+
 @pytest.mark.parametrize("levels", [{}, {"u_level": [0.0], "v_level": [1.0]}])
 def test_row_tags_keeps_text_columns_named_as_network_columns(levels):
     """Text columns named ``length`` and ``walking_area`` hold the tags of those names,
