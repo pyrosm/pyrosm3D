@@ -34,7 +34,7 @@ import numpy as np
 import shapely
 
 from pyrosm3d.dem import sample_dem
-from pyrosm3d.network import _edge_kinds
+from pyrosm3d.network import _along_lines, _edge_kinds
 from pyrosm3d.styles import FLOOR_HEIGHT
 from pyrosm3d.tags import float_column
 
@@ -47,7 +47,6 @@ _LEVEL_WEIGHT, _CLIMB_WEIGHT, _LOOSE_WEIGHT = 3.0, 1.0, 1.0
 # The pull of each end towards its place by level, which settles the ends that nothing
 # ties to a street and is too weak to move the others
 _REST_WEIGHT = 1e-6
-_METRES_PER_DEGREE = 111_195.0
 
 
 def network_heights(edges, dem):
@@ -102,30 +101,6 @@ def network_heights(edges, dem):
     )
     found = edges.assign(u_height=ends[:, 0], v_height=ends[:, 1])
     return found.set_geometry(lines, crs=edges.crs)
-
-
-def _along_lines(lonlat, edge_of, count):
-    """``(first, last, along, lengths)`` of ``count`` lines with the vertices ``lonlat``
-    (``edge_of`` names each vertex's line): the positions of each line's first and last
-    vertex, for each vertex how far along its line it lies (0 at the first vertex, 1 at
-    the last; by position in a line without length, such as a lift), and each line's
-    length in metres."""
-    counts = np.bincount(edge_of, minlength=count)
-    last = np.cumsum(counts) - 1
-    first = last - counts + 1
-    # East along the shorter way round, also across the 180th meridian
-    east = (np.diff(lonlat[:, 0]) + 180.0) % 360.0 - 180.0
-    east *= _METRES_PER_DEGREE * np.cos(np.radians(lonlat[1:, 1]))
-    steps = np.hypot(east, np.diff(lonlat[:, 1]) * _METRES_PER_DEGREE)
-    steps = np.r_[0.0, steps]
-    steps[first] = 0.0
-    run = np.cumsum(steps)
-    run -= run[first][edge_of]
-    lengths = run[last]
-    total = lengths[edge_of]
-    place = (np.arange(len(lonlat)) - first[edge_of]) / (counts[edge_of] - 1)
-    along = np.where(total > 0, run / np.where(total > 0, total, 1.0), place)
-    return first, last, along, lengths
 
 
 def _streets(edges):

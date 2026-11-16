@@ -152,9 +152,11 @@ def test_plot_network_draws_graphs(helsinki_indoor, graph_type):
     The graph is simplified, and an edge that joins several ways is drawn way by way.
     The edge from node 1514631272 to 173248856 joins a segment of the footway 16759160
     and two of the footway 16759161, a tunnel on layer -1: a route along it runs at
-    street level and then on level -1, and the two parts share the edge's length. The
-    edge from 3929024819 to 189433503 joins Vilhonkatu (way 29498962) and Rautatientori
-    (ways 4247505 and 34732049)."""
+    street level and then on level -1. The edge from 3929024819 to 189433503 joins
+    Vilhonkatu (way 29498962) and Rautatientori (ways 4247505 and 34732049). The edge
+    from 946518188 to 946518151 turns a corner between its two ways: its parts are as
+    long as the ways' segments are in the graph without simplification, 17.63 m and
+    32.02 m."""
     osm, _, _ = helsinki_indoor
     graph = osm.get_graph(
         "walking", graph_type=graph_type, indoor_elements=True, retain_all=True
@@ -182,9 +184,11 @@ def test_plot_network_draws_graphs(helsinki_indoor, graph_type):
     first, between, last = chains[tunnel_edge]
     assert (first, last) == tunnel_edge and between < merged[["u", "v"]].min().min()
     parts = edges[(edges["u"] == between) | (edges["v"] == between)]
-    whole = merged[(merged["u"] == first) & (merged["v"] == last)]
     assert parts["id"].tolist() == [16759160, 16759161]
-    assert parts["length"].sum() == pytest.approx(whole["length"].sum())
+    _, corner, _ = chains[(946518188, 946518151)]
+    parts = edges[(edges["u"] == corner) | (edges["v"] == corner)]
+    assert parts["id"].tolist() == [81239432, 81239444]
+    assert parts["length"].tolist() == pytest.approx([17.63, 32.02], abs=0.01)
 
 
 def test_plot_network_draws_a_graph_made_by_hand():
@@ -234,10 +238,10 @@ def test_plot_network_draws_merged_edges_made_by_hand():
     east and a hill of 100 m above the middle of the tunnel, the tunnel runs straight
     from 10 m to 14 m.
 
-    Two edges are kept whole. The stairs from node 2 to 3 climb from level 0 to 1, so
-    the levels between their two ways are not known: the hover text names both ways
-    and both names. The list of the edge from node 3 to -5 has another length than its
-    line has segments."""
+    Two edges are kept whole. The stairs from node 2 to 3 climb from level 0 to 1:
+    the hover text names both ways and both names. The edge from node 3 to -5 has two
+    segments, the two booleans of ``reversed`` and a list of three names: neither list
+    splits it."""
     import networkx as nx
 
     def line(*east):
@@ -264,7 +268,14 @@ def test_plot_network_draws_merged_edges_made_by_hand():
         v_level=1.0,
         vertical="stairs",
     )
-    graph.add_edge(3, -5, geometry=line(5, 6, 7, 8), id=15, reversed=[False, True])
+    graph.add_edge(
+        3,
+        -5,
+        geometry=line(5, 6, 7),
+        id=15,
+        reversed=[False, True],
+        name=["X", "Y", "Z"],
+    )
     edges, chains = _edges_by_way(_graph_frames(graph)[0])
     assert chains == {(1, 2): [1, -6, -7, 2]}
     assert sorted(zip(edges["u"], edges["v"])) == [
@@ -278,7 +289,7 @@ def test_plot_network_draws_merged_edges_made_by_hand():
     assert set(traces["Walkways at street level"].text) - {None} == {
         "A<br>way 10 · street<br>level 0",
         "A<br>way 12 · street<br>level 0",
-        "Walkways at street level<br>way 15 · street<br>level 0",
+        "X;Y;Z<br>way 15 · street<br>level 0",
     }
     assert set(traces["Walkways on other levels"].text) - {None} == {
         "Walkways on other levels<br>way 11 · levels<br>level -2"
@@ -286,7 +297,7 @@ def test_plot_network_draws_merged_edges_made_by_hand():
     assert set(traces["Stairs"].text) - {None} == {
         "B;C<br>ways 13, 14 · stairs<br>levels 0 → 1"
     }
-    along = [0, 0, 0, 0, None, 1, 0.5, 0, None]  # the street and the stairs
+    along = [0, 0, 0, None, 1, 0.5, 0, None]  # the street and the stairs
     along += [0, 0, None, -2, -2, -2, None, 0, 0, None]  # ways 12, 11 and 10
     assert list(traces["Route"].z) == along
 

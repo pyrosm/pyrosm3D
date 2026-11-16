@@ -58,6 +58,8 @@ EDGE_NAMES = {
     "platform": "platform",
     "crossing": "line across an area",
 }
+# Metres in a degree of latitude
+_METRES_PER_DEGREE = 111_195.0
 # The route: red, wide and solid, drawn over the edges; the escalators are amber so that
 # they stay apart from it
 _ROUTE_COLOUR = "#e8002d"
@@ -123,8 +125,9 @@ def _edges_by_way(edges):
     node id below zero and below every id of the edges. ``chains`` holds the nodes
     along each split edge, ``{(u, v): [u, ..., v]}``.
 
-    An edge that climbs from one level to another is kept whole, as the levels
-    between its parts are not known, and so is a list of another length;
+    An edge that climbs from one level to another is kept whole. A list of another
+    length and a list of booleans (networkx's ``oneway`` and ``reversed`` hold the
+    different values of the ways, not one for each segment) do not split an edge.
     :func:`pyrosm3d.tags.row_tags` joins the values of the lists that are left."""
     geometry = edges.geometry.name
     listed = np.zeros(len(edges), dtype=bool)
@@ -143,7 +146,9 @@ def _edges_by_way(edges):
         lists = {
             column: cell
             for column, cell in edge.items()
-            if isinstance(cell, list) and len(cell) == count
+            if isinstance(cell, list)
+            and len(cell) == count
+            and not all(isinstance(value, (bool, np.bool_)) for value in cell)
         }
         if not lists:
             continue
@@ -153,14 +158,13 @@ def _edges_by_way(edges):
             if any(_differ(cell[i - 1], cell[i]) for cell in lists.values())
         ]
         nodes = [edge["u"], *itertools.islice(spare, len(starts) - 1), edge["v"]]
-        steps = np.hypot(*np.diff(points, axis=0).T)
+        along = _along_lines(points, np.zeros(len(points), dtype=int), 1)[2]
         for part, (start, stop) in enumerate(zip(starts, starts[1:] + [count])):
             values = {column: cell[start] for column, cell in lists.items()}
             line = shapely.LineString(points[start : stop + 1])
             ends = {"u": nodes[part], "v": nodes[part + 1], geometry: line}
             if "length" in edge:
-                share = steps[start:stop].sum() / (steps.sum() or 1.0)
-                ends["length"] = edge["length"] * share
+                ends["length"] = edge["length"] * (along[stop] - along[start])
             parts.append({**edge, **values, **ends})
         chains[(edge["u"], edge["v"])] = nodes
         split.append(row)
@@ -169,6 +173,30 @@ def _edges_by_way(edges):
     parts = GeoDataFrame(parts, geometry=geometry, crs=edges.crs)
     whole = edges.drop(index=edges.index[split])
     return pd.concat([whole, parts], ignore_index=True), chains
+
+
+def _along_lines(lonlat, edge_of, count):
+    """``(first, last, along, lengths)`` of ``count`` lines with the vertices ``lonlat``
+    (``edge_of`` names each vertex's line): the positions of each line's first and last
+    vertex, for each vertex how far along its line it lies (0 at the first vertex, 1 at
+    the last; by position in a line without length, such as a lift), and each line's
+    length in metres."""
+    counts = np.bincount(edge_of, minlength=count)
+    last = np.cumsum(counts) - 1
+    first = last - counts + 1
+    # East along the shorter way round, also across the 180th meridian
+    east = (np.diff(lonlat[:, 0]) + 180.0) % 360.0 - 180.0
+    east *= _METRES_PER_DEGREE * np.cos(np.radians(lonlat[1:, 1]))
+    steps = np.hypot(east, np.diff(lonlat[:, 1]) * _METRES_PER_DEGREE)
+    steps = np.r_[0.0, steps]
+    steps[first] = 0.0
+    run = np.cumsum(steps)
+    run -= run[first][edge_of]
+    lengths = run[last]
+    total = lengths[edge_of]
+    place = (np.arange(len(lonlat)) - first[edge_of]) / (counts[edge_of] - 1)
+    along = np.where(total > 0, run / np.where(total > 0, total, 1.0), place)
+    return first, last, along, lengths
 
 
 def _differ(value, other):
