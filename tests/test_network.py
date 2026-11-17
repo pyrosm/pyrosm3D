@@ -78,8 +78,9 @@ def test_plot_network_draws_an_indoor_network(helsinki_indoor):
 
 def test_plot_network_draws_heights_in_metres(helsinki_centre, helsinki_dem):
     """With a terrain model the centre of Helsinki is drawn at the heights of
-    network_heights, on an axis in metres: a lift is a vertical line between the
-    heights of its two ends, which the hover texts give; the route runs down it; the
+    network_heights, on an axis in metres: a lift from level -2 to the ground floor
+    is a vertical line between the heights of its two ends, 12 m apart, which the
+    hover texts give; the route runs down it; the
     entrance of node 249350774 is at the network's height on its level (12.7 m, the
     ground is at 15 m) and that of node 2261292460, which the network meets on another
     level only, on the ground. Where the terrain model has no heights, edges and
@@ -92,12 +93,12 @@ def test_plot_network_draws_heights_in_metres(helsinki_centre, helsinki_dem):
     assert scene.zaxis.title.text == "height (m)" and scene.aspectratio.z == 0.25
     traces = _traces(figure)
     ends = found.loc[lift, ["u_height", "v_height"]].round(2).tolist()
-    assert ends == [-3.94, 4.05]
+    assert ends == [-7.89, 4.09]
     lifts = traces["Lifts"]
     assert list(lifts.z[:3]) == ends + [None] and lifts.x[0] == lifts.x[1]
-    assert lifts.text[0].endswith("levels -2 → 0<br>-3.9 m")
+    assert lifts.text[0].endswith("levels -2 → 0<br>-7.9 m")
     assert list(traces["Route"].z) == ends[::-1] + [None]
-    assert traces["Route"].text[1] == "route<br>-3.9 m"
+    assert traces["Route"].text[1] == "route<br>-7.9 m"
 
     heights = dict(zip(traces["Station entrances"].text, traces["Station entrances"].z))
     end = found[(found["u"] == entrance) & (found["u_level"] == 0)]["u_height"].iloc[0]

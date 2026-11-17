@@ -1,7 +1,11 @@
 """The heights, colours and names used in the drawings of indoor elements."""
 
+import numpy as np
+
 # Metres of drawing height for one level
 FLOOR_HEIGHT = 4.0
+# Metres for one level below the ground floor, where levels are placed in metres
+UNDERGROUND_FLOOR_HEIGHT = 6.0
 # Walls are cut away at this height, so that the rooms stay visible from above
 WALL_HEIGHT = 0.4 * FLOOR_HEIGHT
 # Metres drawn around the indoor areas
@@ -70,3 +74,11 @@ HOVER_LABEL = dict(bgcolor="#ffffff", bordercolor="#d6dbe1", font_color="#1c2229
 # (name in the legend, colour, marker symbol, name in the hover text) of the markers
 DOOR_STYLE = ("Doors and entrances", "#31363b", "square", "door or entrance")
 POI_STYLE = ("Shops and amenities", "#a07a00", "circle", "shop or amenity")
+
+
+def metres_of_levels(levels):
+    """How many metres ``levels`` (a number or an array) lie above the ground floor,
+    level 0: :data:`FLOOR_HEIGHT` metres for each level above it and
+    :data:`UNDERGROUND_FLOOR_HEIGHT` metres for each level below it."""
+    levels = np.asarray(levels, dtype=float)
+    return np.where(levels < 0, UNDERGROUND_FLOOR_HEIGHT, FLOOR_HEIGHT) * levels
