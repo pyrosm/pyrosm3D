@@ -82,3 +82,10 @@ def metres_of_levels(levels):
     :data:`UNDERGROUND_FLOOR_HEIGHT` metres for each level below it."""
     levels = np.asarray(levels, dtype=float)
     return np.where(levels < 0, UNDERGROUND_FLOOR_HEIGHT, FLOOR_HEIGHT) * levels
+
+
+def levels_of_metres(metres):
+    """The levels (a number or an array) that lie ``metres`` above the ground floor:
+    the inverse of :func:`metres_of_levels`."""
+    metres = np.asarray(metres, dtype=float)
+    return metres / np.where(metres < 0, UNDERGROUND_FLOOR_HEIGHT, FLOOR_HEIGHT)
