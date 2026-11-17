@@ -52,7 +52,7 @@ osm.in3d.plot_network(dem=dem).show()          # the network drawn in metres
 pip install "pyrosm3d[dem] @ git+https://github.com/pyrosm/pyrosm3D@main"
 ```
 
-OpenStreetMap holds no depths: a floor that meets no street, such as a metro platform, is placed 4 m per level from the floors that it is joined to, not at its real depth. `pyrosm3d.network_heights(edges, dem)` gives the heights to edges that you have read yourself.
+OpenStreetMap holds no depths: a floor that meets no street, such as a metro platform, is placed by its level from the floors that it is joined to, 6 m for each level below the ground floor and 4 m for each level above it, not at its real depth. `pyrosm3d.network_heights(edges, dem)` gives the heights to edges that you have read yourself.
 
 ## Documentation
 

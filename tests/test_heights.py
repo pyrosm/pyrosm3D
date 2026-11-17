@@ -73,13 +73,13 @@ CASES = {
         {4: [14, 22]},
     ),
     # a corridor on level -1 and stairs up from it, where the ground is at 10 m and
-    # nothing meets a street
+    # nothing meets a street: a level below ground is 6 m
     "floor away from streets": (
         [
             _floor(1, 2, -1, -1, (0,), (0, 2)),
             _floor(2, 3, -1, 0, (0, 2), (0, 4), vertical="stairs"),
         ],
-        [(6, 6), (6, 10)],
+        [(4, 4), (4, 10)],
         {},
     ),
     # a bridge from node 2 to node 5 with a vertex over the hill, 2.5 of 4 steps along
@@ -99,7 +99,8 @@ CASES = {
         {},
     ),
     # node 3 on level -1 (a corridor from the street, 10 m) and on level 1 (stairs
-    # two levels up to node 4 and a corridor back, 18 m): an indoor way without a
+    # up to node 4, 6 m to the ground floor and 4 m above it, and a corridor back,
+    # 20 m): an indoor way without a
     # level, drawn at level 0, starts from the lower of the two, and a way tagged
     # with levels 1 and 2, drawn at level 1, from level 1
     "ends without a level": (
@@ -111,7 +112,7 @@ CASES = {
             dict(u=3, v=7, line=[(1,), (1, 2)], tags='{"indoor":"yes"}'),
             dict(u=3, v=8, line=[(1,), (1, -2)], tags='{"level":"1;2"}'),
         ],
-        STREET_ENDS + [(10, 10), (10, 18), (18, 18), (10, 10), (18, 18)],
+        STREET_ENDS + [(10, 10), (10, 20), (20, 20), (10, 10), (20, 20)],
         {},
     ),
     # a street that leaves the terrain model after 9 steps north; a corridor from its
@@ -126,7 +127,7 @@ CASES = {
             _floor(1, 4, 0, 0, (8,), (9,), (10.5,)),
             _floor(5, 6, -1, -1, (9,), (10.5,)),
         ],
-        [(42, NONE), (NONE, NONE), (NONE, NONE), (42, NONE), (42, NONE)],
+        [(42, NONE), (NONE, NONE), (NONE, NONE), (42, NONE), (40, NONE)],
         {0: None, 3: None, 4: None},
     ),
 }
@@ -198,9 +199,11 @@ def test_network_heights_place_the_centre_of_helsinki(helsinki_centre, helsinki_
     """On the walking network around Helsinki's railway station, Forum and Kamppi:
     the lines across an outdoor square have the terrain's height at each vertex; the
     door of Forum to its courtyard Kukontori, which a street ends at, has the ground's
-    height on Forum's level 2; every node has one height on each level; and each of
-    the 95 edges between two levels climbs 2 to 5 m for each level towards its higher
-    end."""
+    height on Forum's level 2; every node has one height on each level; each of the
+    95 edges between two levels climbs towards its higher end, the 50 below the
+    ground floor 3 to 7.1 m for each level (6 m in the median) and the 45 above it 2
+    to 5 m (4 m in the median); and the metro platform of the railway station, on
+    level -3, lies three levels of 6 m below the ground above it."""
     nodes, edges = helsinki_centre
     found = network_heights(edges, helsinki_dem)
     square = found[(found["id"] == 1320750) & found["u_level"].isna()]
@@ -233,5 +236,14 @@ def test_network_heights_place_the_centre_of_helsinki(helsinki_centre, helsinki_
     per_level = (climbs["v_height"] - climbs["u_height"]) / (
         climbs["v_level"] - climbs["u_level"]
     )
-    assert len(climbs) == 95
-    assert per_level.between(2, 5).all()
+    below = climbs[["u_level", "v_level"]].max(axis=1) <= 0
+    assert len(climbs) == 95 and below.sum() == 50
+    assert per_level[below].between(3, 7.1).all()
+    assert per_level[below].median() == pytest.approx(6, abs=0.05)
+    assert per_level[~below].between(2, 5).all()
+    assert per_level[~below].median() == pytest.approx(4, abs=0.05)
+
+    platform = nodes[nodes["id"] == 5403677505].geometry.iloc[0]
+    on_level_3 = found[(found["u"] == 5403677505) & (found["u_level"] == -3)]
+    ground = sample_dem([platform.x], [platform.y], helsinki_dem)[0]
+    assert ground - on_level_3["u_height"].to_numpy() == pytest.approx(18, abs=0.5)

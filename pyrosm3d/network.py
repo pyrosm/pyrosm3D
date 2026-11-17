@@ -6,15 +6,18 @@ moving walkways, lifts, platforms and the lines across areas, each kind a legend
 that hides or shows it.
 A walkway tagged with several levels is drawn flat at the lowest, dotted; an edge
 without a level at its layer when that is below street level (a tunnel at least one
-below), else at street level. The vertical axis counts OSM levels, not metres.
+below), else at street level. The view is true to scale: a level is drawn 4 m from
+the next above the ground floor and 6 m below it
+(:func:`pyrosm3d.styles.metres_of_levels`), and the vertical axis names the levels.
 An edge of a simplified graph that joins several ways is drawn way by way (see
 :func:`_edges_by_way`).
 
 With a terrain model the edges are drawn at heights in metres instead, those of
-:func:`pyrosm3d.heights.network_heights`.
+:func:`pyrosm3d.heights.network_heights`, on a vertical axis in metres.
 """
 
 import itertools
+import math
 
 import numpy as np
 import pandas as pd
@@ -32,6 +35,7 @@ from pyrosm3d.tags import (
     level_ranges,
     row_tags,
 )
+from pyrosm3d.styles import levels_of_metres, metres_of_levels
 from pyrosm3d.touch import TouchFigure
 
 # (name in the legend, colour, line width, dash) of each kind of edge
@@ -327,13 +331,14 @@ def _line_heights(line, origin, vertical=False):
     return points[:, 0] - origin[0], points[:, 1] - origin[1], points[:, 2]
 
 
-def _edge_points(line, kind, z_u, z_v, origin, in_metres):
+def _edge_points(line, kind, level_u, level_v, origin, in_metres):
     """x, y (metres from ``origin``) and z of the points of the ``line`` of an edge of
     the ``kind``, a lift a vertical line: its own heights when ``in_metres`` (see
-    :func:`_line_heights`), else its levels from ``z_u`` to ``z_v`` (see
-    :func:`_line_points`)."""
+    :func:`_line_heights`), else from the height of ``level_u`` to that of ``level_v``
+    (see :func:`pyrosm3d.styles.metres_of_levels` and :func:`_line_points`)."""
     if in_metres:
         return _line_heights(line, origin, vertical=kind == "lift")
+    z_u, z_v = metres_of_levels([level_u, level_v]).tolist()
     return _line_points(line, z_u, z_v, origin, vertical=kind == "lift")
 
 
@@ -473,31 +478,67 @@ def plot_network(
     if route is not None:
         _add_route(figure, route, ends, in_metres)
     if nodes is not None:
-        entrances, heights = _entrances(nodes)
+        entrances, levels = _entrances(nodes)
         if in_metres:
-            heights = _entrance_heights(entrances, heights, edges, dem)
+            heights = _entrance_heights(entrances, levels, edges, dem)
+        else:
+            heights = metres_of_levels(levels).tolist()
         _add_entrances(
             figure, entrances.to_crs(crs), heights, middle, radius, in_metres
         )
     figure.update_layout(
-        scene=dict(
-            xaxis_title="east (m)",
-            yaxis_title="north (m)",
-            zaxis_title="height (m)" if in_metres else "level",
-            aspectmode="manual",
-            # heights in metres are drawn flatter: streets slope
-            aspectratio=dict(x=1, y=1, z=0.25 if in_metres else 0.5),
-        ),
+        scene=_scene_to_scale(figure, in_metres),
         legend=dict(itemclick="toggle"),
         margin=dict(l=0, r=0, t=30, b=0),
     )
     return figure
 
 
+def _scene_to_scale(figure, in_metres):
+    """The scene of ``figure`` with its three axes at one scale: each axis ranges over
+    the drawn points and a margin (sideways 2 % of the wider horizontal span, at least
+    1 m; 1 m up and down), and the scene has the proportions of the ranges; a figure
+    without points keeps plotly's own ranges and proportions. The vertical axis is in
+    metres when the points are drawn ``in_metres``; else it names each whole level at
+    its height (see :func:`pyrosm3d.styles.metres_of_levels`)."""
+    vertical = dict(title="height (m)" if in_metres else "level")
+    scene = dict(xaxis=dict(title="east (m)"), yaxis=dict(title="north (m)"))
+    scene["zaxis"] = vertical
+    spans = []
+    for axis in "xyz":
+        drawn = [
+            value
+            for trace in figure.data
+            for value in getattr(trace, axis)
+            if value is not None
+        ]
+        if not drawn:
+            return scene
+        spans.append((min(drawn), max(drawn)))
+    sideways = max(0.02 * max(high - low for low, high in spans[:2]), 1.0)
+    margins = (sideways, sideways, 1.0)
+    ranges = [[low - by, high + by] for (low, high), by in zip(spans, margins)]
+    width = ranges[0][1] - ranges[0][0]
+    if not in_metres:
+        low, high = levels_of_metres(spans[2]).round(6)
+        levels = np.arange(math.ceil(low), math.floor(high) + 1)
+        vertical.update(
+            tickvals=metres_of_levels(levels).tolist(),
+            ticktext=["%d" % level for level in levels],
+        )
+    for axis, span in zip("xyz", ranges):
+        scene[axis + "axis"]["range"] = span
+    scene["aspectmode"] = "manual"
+    scene["aspectratio"] = {
+        axis: (high - low) / width for axis, (low, high) in zip("xyz", ranges)
+    }
+    return scene
+
+
 def _add_route(figure, route, ends, in_metres):
     """Add the ``route`` (node ids) as a line along the edges between consecutive nodes,
     either way (``ends``: ``{frozenset((u, v)): (u, (x, y, z))}``, the node an edge
-    starts at and its points as drawn, z ``in_metres`` or in levels), with markers at
+    starts at and its points as drawn, z ``in_metres`` or by levels), with markers at
     its first and last point; steps without an edge are left out."""
     line_trace = _Trace()
     for a, b in zip(route[:-1], route[1:]):
@@ -557,7 +598,8 @@ def _add_area_outlines(trace, areas, middle, radius):
         if geometry is None or not _near(geometry, middle, radius):
             continue
         ranges = level_ranges(tags.get("level"))
-        z = min(r[0] for r in ranges) if ranges else 0.0
+        level = min(r[0] for r in ranges) if ranges else 0.0
+        z = float(metres_of_levels(level))
         for part in shapely.get_parts(geometry):
             if part.geom_type == "Polygon":
                 lines = shapely.get_rings(part)
@@ -567,7 +609,7 @@ def _add_area_outlines(trace, areas, middle, radius):
                 continue
             for line in lines:
                 points = _line_points(line, z, z, (middle.x, middle.y))
-                trace.add(*points, "area, level %g" % z)
+                trace.add(*points, "area, level %g" % level)
 
 
 def _entrances(nodes):
@@ -604,9 +646,9 @@ def _entrance_heights(entrances, levels, edges, dem):
 
 def _add_entrances(figure, entrances, heights, middle, radius, in_metres=False):
     """Add the station ``entrances`` (in metres) within ``radius`` of ``middle`` as
-    markers at their ``heights``, levels or metres (``in_metres``: the hover text
-    gives them, and an entrance without a height is left out). The markers are hidden
-    until they are picked in the legend."""
+    markers at their ``heights``: those of their levels, or heights ``in_metres``,
+    which the hover text then gives (an entrance without a height is left out). The
+    markers are hidden until they are picked in the legend."""
     x, y, z, text = [], [], [], []
     for row, height in zip(entrances.itertuples(), heights):
         point = row.geometry

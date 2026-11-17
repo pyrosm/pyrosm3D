@@ -21,7 +21,11 @@ def _traces(figure):
 
 def test_plot_network_draws_an_indoor_network(helsinki_indoor):
     """Each kind of edge is a legend entry; the lift of node 2039713549 is a vertical
-    line from level -2 to 0; a radius keeps what reaches near the center; the route is
+    line from level -2, 12 m below the ground floor, to level 0; the vertical axis
+    names the levels at their heights, 6 m apart below the ground floor and 4 m above
+    it, down to level -4, and the scene has the proportions of its axes' ranges, the
+    vertical one 1 m beyond the drawn points; a radius keeps what reaches near the
+    center; the route is
     a line, drawn over the edges with markers at its ends, that rises through the lift
     (a step that is not an edge left out, no route without the u and v columns;
     repeated index labels are fine; the same route for edges in another coordinate
@@ -43,12 +47,22 @@ def test_plot_network_draws_an_indoor_network(helsinki_indoor):
     assert traces["Station entrances"].visible == "legendonly"
     assert traces["Lifts"].visible is None
     lift = traces["Lifts"]
-    assert [lift.z[i] for i in range(3)] == [-2.0, 0.0, None]
+    assert [lift.z[i] for i in range(3)] == [-12.0, 0.0, None]
+    scene = figure.layout.scene
+    levels = [int(text) for text in scene.zaxis.ticktext]
+    assert scene.zaxis.title.text == "level" and levels == [-4, -3, -2, -1, 0]
+    assert list(scene.zaxis.tickvals) == [
+        6 * level if level < 0 else 4 * level for level in levels
+    ]
+    spans = [axis.range[1] - axis.range[0] for axis in (scene.xaxis, scene.zaxis)]
+    assert scene.aspectratio.x == 1
+    assert scene.aspectratio.z == pytest.approx(spans[1] / spans[0])
+    assert list(scene.zaxis.range) == [-25, 1]
     route_z = pd.Series(traces["Route"].z)
     steps = [
         list(part.dropna()) for _, part in route_z.groupby(route_z.isna().cumsum())
     ]
-    assert [-2.0, 0.0] in steps
+    assert [-12.0, 0.0] in steps
     line, ends = traces["Route"], traces["Route ends"]
     points = [p for p in zip(line.x, line.y, line.z) if p[0] is not None]
     assert list(zip(ends.x, ends.y, ends.z)) == [points[0], points[-1]]
@@ -78,8 +92,9 @@ def test_plot_network_draws_an_indoor_network(helsinki_indoor):
 
 def test_plot_network_draws_heights_in_metres(helsinki_centre, helsinki_dem):
     """With a terrain model the centre of Helsinki is drawn at the heights of
-    network_heights, on an axis in metres: a lift is a vertical line between the
-    heights of its two ends, which the hover texts give; the route runs down it; the
+    network_heights, on an axis in metres: a lift from level -2 to the ground floor
+    is a vertical line between the heights of its two ends, 12 m apart, which the
+    hover texts give; the route runs down it; the
     entrance of node 249350774 is at the network's height on its level (12.7 m, the
     ground is at 15 m) and that of node 2261292460, which the network meets on another
     level only, on the ground. Where the terrain model has no heights, edges and
@@ -89,15 +104,17 @@ def test_plot_network_draws_heights_in_metres(helsinki_centre, helsinki_dem):
     lift, entrance, on_ground = 2039713549, 249350774, 2261292460
     figure = plot_network(edges, nodes, route=[-lift * 1000 - 1, lift], dem=helsinki_dem)
     scene = figure.layout.scene
-    assert scene.zaxis.title.text == "height (m)" and scene.aspectratio.z == 0.25
+    assert scene.zaxis.title.text == "height (m)" and scene.zaxis.tickvals is None
+    spans = [axis.range[1] - axis.range[0] for axis in (scene.xaxis, scene.zaxis)]
+    assert scene.aspectratio.z == pytest.approx(spans[1] / spans[0])
     traces = _traces(figure)
     ends = found.loc[lift, ["u_height", "v_height"]].round(2).tolist()
-    assert ends == [-3.94, 4.05]
+    assert ends == [-7.89, 4.09]
     lifts = traces["Lifts"]
     assert list(lifts.z[:3]) == ends + [None] and lifts.x[0] == lifts.x[1]
-    assert lifts.text[0].endswith("levels -2 → 0<br>-3.9 m")
+    assert lifts.text[0].endswith("levels -2 → 0<br>-7.9 m")
     assert list(traces["Route"].z) == ends[::-1] + [None]
-    assert traces["Route"].text[1] == "route<br>-3.9 m"
+    assert traces["Route"].text[1] == "route<br>-7.9 m"
 
     heights = dict(zip(traces["Station entrances"].text, traces["Station entrances"].z))
     end = found[(found["u"] == entrance) & (found["u_level"] == 0)]["u_height"].iloc[0]
@@ -117,10 +134,13 @@ def test_plot_network_draws_heights_in_metres(helsinki_centre, helsinki_dem):
     assert not any(z != z for z in west[streets].z if z is not None)
 
 
-def test_plot_network_puts_an_entrance_on_its_edge_in_metres():
+def test_plot_network_draws_a_tunnel_with_an_entrance():
     """An entrance on level -1 in the middle of a tunnel between two streets at 10 m
     and 14 m, under a hill of 100 m: the tunnel has no level columns and is drawn on
-    level -1, so the entrance is at the tunnel's height there, 12 m, not on the hill."""
+    level -1, so the entrance is at the tunnel's height there, 12 m, not on the hill.
+    By levels, the tunnel alone and its entrance lie 6 m below the ground floor, the
+    vertical axis names level -1 there and reaches 1 m up and down; a view that no
+    edge reaches has no points and plotly's own proportions."""
     from geopandas import GeoDataFrame
 
     def line(west, east):
@@ -148,6 +168,15 @@ def test_plot_network_puts_an_entrance_on_its_edge_in_metres():
     entrances = _traces(plot_network(edges, nodes, dem=hill))["Station entrances"]
     assert list(entrances.z) == pytest.approx([12.0], abs=0.01)
     assert list(entrances.text) == ["entrance 3<br>12.0 m"]
+
+    by_levels = plot_network(edges.iloc[1:3], nodes)
+    vertical = by_levels.layout.scene.zaxis
+    assert list(vertical.ticktext) == ["-1"] and list(vertical.tickvals) == [-6]
+    assert list(vertical.range) == [-7, -5]
+    assert list(_traces(by_levels)["Station entrances"].z) == [-6]
+    nothing = plot_network(edges, center=(25.0, 60.17), radius=10)
+    assert not nothing.data and nothing.layout.scene.zaxis.title.text == "level"
+    assert nothing.layout.scene.aspectratio.x is None
 
 
 @pytest.mark.parametrize("graph_type", ["networkx", "igraph"])
@@ -179,7 +208,7 @@ def test_plot_network_draws_graphs(helsinki_indoor, graph_type):
     n_edges = graph.ecount() if graph_type == "igraph" else graph.number_of_edges()
     merged = _graph_frames(graph)[0]
     assert len(merged) * 2 == n_edges
-    assert list(traces["Route"].z)[:7] == [0, 0, None, -1, -1, -1, None]
+    assert list(traces["Route"].z)[:7] == [0, 0, None, -6, -6, -6, None]
     drawn = np.array(
         [traces["Route"].x[7:-1], traces["Route"].y[7:-1]], dtype=float
     )
@@ -316,8 +345,8 @@ def test_plot_network_draws_merged_edges_made_by_hand():
     assert set(traces["Stairs"].text) - {None} == {
         "B;C<br>ways 13, 14 · stairs<br>levels 0 → 1"
     }
-    along = [0, 0, 0, None, 1, 0.5, 0, None]  # the street and the stairs
-    along += [0, 0, None, -2, -2, -2, None, 0, 0, None]  # ways 12, 11 and 10
+    along = [0, 0, 0, None, 4, 2, 0, None]  # the street and the stairs
+    along += [0, 0, None, -12, -12, -12, None, 0, 0, None]  # ways 12, 11 and 10
     assert list(traces["Route"].z) == along
 
     def hill(longitudes, latitudes):

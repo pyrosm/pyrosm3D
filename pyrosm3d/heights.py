@@ -10,22 +10,25 @@ street level by its layer, a lift or a way tagged with several levels.
 
 An end of another edge at a node of a street has the ground's height there. The other
 ends are placed from those, all together. An edge on one level holds its two ends at one
-height. Stairs, an escalator, a lift or another edge between two levels wants
-:data:`pyrosm3d.styles.FLOOR_HEIGHT` metres for each level between its ends. An edge
+height. Stairs, an escalator, a lift or another edge between two levels wants the
+height between them: :data:`pyrosm3d.styles.FLOOR_HEIGHT` metres for each level above
+the ground floor, level 0, and :data:`pyrosm3d.styles.UNDERGROUND_FLOOR_HEIGHT` metres
+for each level below it (:func:`pyrosm3d.styles.metres_of_levels`). An edge
 without a level that is no street (a tunnel, a bridge, an indoor way, a way tagged with
 several levels) holds its ends together, so a bridge or a tunnel runs straight between
 the streets at its ends. Each of these wishes counts in inverse proportion to the length
 of its edge, those of the edges on one level three times, and the heights with the
 smallest squared misses are taken. What nothing ties to a street is placed by its
-levels alone, a floor height for each level from the ground at its place.
+levels alone, as far above or below the ground at its place as its level lies from
+the ground floor.
 
 Where the terrain model has no height, a street's end and what is placed there have
 none (NaN).
 
 OpenStreetMap holds no depths: a floor that meets no street, such as a metro platform,
-is placed a floor height per level from the floors that it is joined to, not at its
-real depth. A terrain model shows the ground without what is built on it: a street on a
-deck or in a courtyard above a slope follows the modelled ground under it.
+is placed by its level from the floors that it is joined to, not at its real depth. A
+terrain model shows the ground without what is built on it: a street on a deck or in a
+courtyard above a slope follows the modelled ground under it.
 """
 
 import math
@@ -35,7 +38,7 @@ import shapely
 
 from pyrosm3d.dem import sample_dem
 from pyrosm3d.network import _along_lines, _edge_kinds
-from pyrosm3d.styles import FLOOR_HEIGHT
+from pyrosm3d.styles import metres_of_levels
 from pyrosm3d.tags import float_column
 
 # The keys whose tags can take an edge without a level off the streets
@@ -165,7 +168,8 @@ def _placed_ends(edges, rows, ground, streets, lengths):
         _ground_at_street_nodes(nodes, ground, streets, nodes[rows]),
     )
     on_levels = ~np.isnan(levels).any(axis=1)
-    climbs = np.where(on_levels, FLOOR_HEIGHT * (levels[:, 1] - levels[:, 0]), 0.0)
+    metres = metres_of_levels(levels)
+    climbs = np.where(on_levels, metres[:, 1] - metres[:, 0], 0.0)
     hold = np.where(climbs != 0, _CLIMB_WEIGHT, _LEVEL_WEIGHT)
     weights = np.where(on_levels, hold, _LOOSE_WEIGHT) / np.maximum(lengths, 1.0)
     placed = _least_squares_heights(number, known, climbs, weights, rest)
@@ -196,8 +200,8 @@ def _end_numbers(nodes, levels, drawn, ground, street_ground):
     (``levels``, NaN without one). An end without a level is the place of its node on
     the level closest to the one its edge is drawn at (``drawn``), the lower of two as
     close, when the node has ends with a level. ``rest`` is the height of each place by
-    its level alone: :data:`pyrosm3d.styles.FLOOR_HEIGHT` metres for each level (the
-    drawn one without a level) from the ``ground`` there.
+    its level alone (the drawn one without a level): as far from the ``ground`` there
+    as :func:`pyrosm3d.styles.metres_of_levels` gives for it.
     """
     levels_at = {}
     for node, level in zip(nodes.ravel().tolist(), levels.ravel().tolist()):
@@ -224,7 +228,7 @@ def _end_numbers(nodes, levels, drawn, ground, street_ground):
         if place not in numbers:
             numbers[place] = len(numbers)
             floor = drawn_level if math.isnan(level) else level
-            rest.append(here + FLOOR_HEIGHT * floor)
+            rest.append(here + float(metres_of_levels(floor)))
         number[end] = numbers[place]
     shape = nodes.shape
     return number.reshape(shape), known.reshape(shape), np.array(rest, dtype=float)
