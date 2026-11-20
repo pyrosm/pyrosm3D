@@ -98,6 +98,22 @@
       turn.value = String(Math.round(((((state.rotationOrbit + 180) % 360) + 360) % 360) - 180));
     };
 
+    // the lift that the walker stands at, if any, with its buttons shown
+    const liftRow = byId("lifts");
+    const liftButtons = { up: byId("liftUp"), down: byId("liftDown") };
+    let lifts = null;
+    const liftHere = () => {
+      let near = null;
+      if (state.walk) {
+        lifts = lifts || view.liftsOf(data.groups);
+        const eye = view.eyeOf(state, tall());
+        near = view.liftAt(lifts, eye[0], eye[1], eye[2] - view.WALK.eye);
+      }
+      liftRow.hidden = !near;
+      liftButtons.up.disabled = !near || near.up === null;
+      liftButtons.down.disabled = !near || near.down === null;
+      return near;
+    };
     // the ground and the walkways that a walker follows (the walkways are sorted out at
     // the first walk)
     const ground = data.groups.find((group) => group.kind === "ground" && group.grid);
@@ -130,6 +146,7 @@
         state = change.viewState;
         instance.setProps({ viewState: state });
         showTilt();
+        liftHere();
       },
       getTooltip: (picked) => {
         const text = view.textOf(picked.object, data.tables);
@@ -150,6 +167,7 @@
     function show() {
       instance.setProps({ viewState: state });
       showTilt();
+      liftHere();
     }
     // flying, the view changes as told; walking, it turns where the walker stands
     function look(change) {
@@ -319,11 +337,22 @@
         });
       });
     }
+    // the lift takes the walker to its next stop up or down
+    function ride(way) {
+      const near = liftHere();
+      if (!near || near[way] === null) return;
+      const eye = view.eyeOf(state, tall());
+      state = view.seenFrom(state, [eye[0], eye[1], near[way] + view.WALK.eye], tall());
+      show();
+    }
     walksWhileHeld(byId("ahead"), 1);
     walksWhileHeld(byId("back"), -1);
+    liftButtons.up.addEventListener("click", () => ride("up"));
+    liftButtons.down.addEventListener("click", () => ride("down"));
     stroll.addEventListener("change", () => walk(stroll.checked));
     trueHeights.addEventListener("change", () => setToScale(trueHeights.checked));
     showTilt();
+    liftHere();
     // the tilt counts degrees above the horizon: 90 from above, 0 from the side,
     // negative from below; walking, it is how far the look is turned down
     tilt.addEventListener("input", () => look({ rotationX: Number(tilt.value) }));
@@ -372,7 +401,7 @@
     });
     showMode();
     return {
-      instance, data, look, walk, step, resized, mode: setMode, level: setLevel,
+      instance, data, look, walk, step, ride, resized, mode: setMode, level: setLevel,
       toScale: setToScale, state: () => ({ mode, level, stretch: stretched() }),
       view: () => state,
     };

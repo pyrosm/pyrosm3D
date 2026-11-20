@@ -439,8 +439,8 @@ def test_the_page_moves_with_the_real_library(check, tmp_path, deck_bundle):
     camera on the ground or a walkway at the middle of the view, with a wide field of
     view, the moves and lift rows, and heights to scale; a drag looks around, a pinch,
     the wheel, the arrow keys and the Forward and Back steps walk; stairs take the
-    walker down into a tunnel and back up; leaving the walk gives the flying view back
-    over the walker, and "Start view" ends it."""
+    walker down into a tunnel and back up, and a lift's buttons ride it; leaving the
+    walk gives the flying view back over the walker, and "Start view" ends it."""
     node = shutil.which("node")
     if node is None:
         if os.environ.get("CI"):

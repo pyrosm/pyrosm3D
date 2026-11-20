@@ -1,5 +1,5 @@
 // Walking in pyrosm3d's views: where the camera of a walker stands and how it moves
-// along the ground, the walkways of the network, stairs and ramps.
+// along the ground, the walkways of the network, stairs, ramps and lifts.
 (function (view) {
   "use strict";
 
@@ -18,6 +18,7 @@
     gain: 12, // metres a second that each second of holding adds
     fast: 50, // metres a second at most
     near: 4, // metres to the side within which a walkway carries the walker
+    lift: 3, // metres to a lift within which the walker can take it
     window: 2.5, // metres up or down within which a walkway or the terrain is at the walker's feet
     start: [1, 2.5], // metres from the terrain within which a walk looks for a walkway to start on, nearest first
     slope: 1, // metres that the walker rises or falls at most in a metre walked
@@ -148,6 +149,60 @@
     return best;
   }
 
+  // The lifts of the data: the stretches of the network's lines that go straight up
+  // (under 5 cm sideways and at least 20 cm up), each lift as its place and the heights
+  // of its stops, lowest first. A stretch whose foot is under 20 cm from the place of a
+  // lift found before joins it, and stops under 20 cm apart are one stop; the stretches
+  // of a lift node share one place. How stretches near each other are grouped does not
+  // change the rides: liftAt joins the stops of all lifts within reach
+  function liftsOf(groups) {
+    const lifts = [];
+    groups.forEach((group) => {
+      if (group.kind !== "lines" || group.always) return;
+      group.items.forEach((item) => {
+        for (let at = 1; at < item.p.length; at += 1) {
+          const one = item.p[at - 1];
+          const other = item.p[at];
+          if (Math.hypot(other[0] - one[0], other[1] - one[1]) >= 0.05) continue;
+          if (Math.abs(other[2] - one[2]) < 0.2) continue;
+          let lift = lifts.find((known) => Math.hypot(known.x - one[0], known.y - one[1]) < 0.2);
+          if (!lift) {
+            lift = { x: one[0], y: one[1], stops: [] };
+            lifts.push(lift);
+          }
+          [one[2], other[2]].forEach((stop) => {
+            if (!lift.stops.some((known) => Math.abs(known - stop) < 0.2)) lift.stops.push(stop);
+          });
+        }
+      });
+    });
+    lifts.forEach((lift) => lift.stops.sort((one, other) => one - other));
+    return lifts;
+  }
+
+  // The lifts that a walker can take at a place: those within WALK.lift metres that
+  // have a stop within WALK.window of the walker's feet, as the heights of the
+  // nearest stop up and the nearest stop down that any of them goes to (null where
+  // none does); null when there is no such lift
+  function liftAt(lifts, x, y, feet) {
+    let found = null;
+    lifts.forEach((lift) => {
+      if (Math.hypot(lift.x - x, lift.y - y) > WALK.lift) return;
+      let at = -1;
+      lift.stops.forEach((stop, place) => {
+        const off = Math.abs(stop - feet);
+        if (off <= WALK.window && (at < 0 || off < Math.abs(lift.stops[at] - feet))) at = place;
+      });
+      if (at < 0) return;
+      found = found || { up: null, down: null };
+      const above = at + 1 < lift.stops.length ? lift.stops[at + 1] : null;
+      const below = at > 0 ? lift.stops[at - 1] : null;
+      if (above !== null && (found.up === null || above < found.up)) found.up = above;
+      if (below !== null && (found.down === null || below > found.down)) found.down = below;
+    });
+    return found;
+  }
+
   // The height of the ground of a grid (see view.squaresOf) at a place, between the
   // four corners around it; null outside the grid and where a corner has no height.
   // The heights are those of the drawn surface, or others for the same corners, such as
@@ -211,7 +266,7 @@
   }
 
   Object.assign(view, {
-    WALK, eyeOf, seenFrom, turnedView, walkedView, walkwaysOf, walkwayAt, groundAt, startingAt,
-    climbOver,
+    WALK, eyeOf, seenFrom, turnedView, walkedView, walkwaysOf, walkwayAt, liftsOf, liftAt,
+    groundAt, startingAt, climbOver,
   });
 })((window.pyrosm3d = window.pyrosm3d || {}));

@@ -2,8 +2,8 @@
 // drawing; there is no WebGL here). The page's data is made by the test: a street at
 // 10 m along y = 0, stairs from it at x = 50 down to 5 m at y = 20, a tunnel on from
 // there, a bridge at 16 m across the tunnel at y = 30, a lift at x = 60 from 10 m to
-// 30 m (no walkway), a route, and terrain at 10 m with the drawn ground at 9.5 m.
-// Exits with an error when a check fails.
+// 30 m, a route, and terrain at 10 m with the drawn ground at 9.5 m. Exits with an
+// error when a check fails.
 //
 // usage: node walk_check.js <page.html> <deck.gl bundle>
 const fs = require("fs");
@@ -168,6 +168,23 @@ started.look({ rotationOrbit: 180 });
 started.step(60);
 close(view.eyeOf(started.view(), H)[2] - WALK.eye, 10, 1e-6, "back up the stairs to the street");
 
+// At the lift its buttons show; Up takes the walker to the next stop, 30 m, and Down
+// back; away from it they hide
+started.walk(false);
+started.look({ target: [60, 0, 10] });
+started.walk(true);
+assert.strictEqual(byId("lifts").hidden, false, "the lift's buttons show");
+assert.strictEqual(byId("liftUp").disabled, false);
+assert.strictEqual(byId("liftDown").disabled, true);
+byId("liftUp").fire("click");
+close(view.eyeOf(started.view(), H)[2] - WALK.eye, 30, 1e-9, "the lift takes the walker up");
+assert.strictEqual(byId("liftDown").disabled, false);
+byId("liftDown").fire("click");
+close(view.eyeOf(started.view(), H)[2] - WALK.eye, 10, 1e-9, "and down");
+started.look({ rotationOrbit: 270 });
+started.step(20);
+assert.strictEqual(byId("lifts").hidden, true, "away from the lift its buttons hide");
+
 // Leaving: a flying view over the walker, as the view was before the walk; steps do
 // nothing while flying; "Start view" ends a walk and goes to the start
 const here = view.eyeOf(started.view(), H);
@@ -193,8 +210,8 @@ byId("walk").checked = true;
 byId("walk").fire("change");
 assert.strictEqual(started.view().walk, true);
 
-// The walkways of the data: the route and the lift are no walkways; between the
-// tunnel and the bridge there is none
+// The walkways and lifts of the data: the route and the lift are no walkways; between
+// the tunnel and the bridge there is none; lifts list their stops
 const ways = view.walkwaysOf(started.data.groups);
 assert.strictEqual(ways.ends.length / 6, 4, "the street, the stairs, the tunnel and the bridge");
 close(view.walkwayAt(ways, 50, 30, 5), 5, 1e-6, "in the tunnel under the bridge");
@@ -210,4 +227,11 @@ const climb = view.climbOver(() => ways, grid);
 let walker = [20, -50, 12 + WALK.eye];
 walker = [walker[0], walker[1] + 1, climb(walker, walker[0], walker[1] + 1)];
 close(walker[2] - WALK.eye, 11, 1e-6, "a metre walked brings the walker a metre down at most");
+assert.deepStrictEqual(plain(view.liftsOf(started.data.groups).map((lift) => lift.stops)), [[10, 30]]);
+const doubled = [{ kind: "lines", items: [{ p: [[0, 0, 10], [0, 0.01, 10.1], [5, 0, 10]] }] }];
+assert.deepStrictEqual(plain(view.liftsOf(doubled)), [], "a doubled point is no lift");
+const pair = [{ x: 0, y: 0, stops: [10, 14] }, { x: 2, y: 0, stops: [3, 10] }];
+assert.deepStrictEqual(plain(view.liftAt(pair, 1, 0, 10)), { up: 14, down: 3 }, "two lifts side by side");
+assert.strictEqual(view.liftAt(pair, 1, 0, 6.5), null, "between two stops");
+assert.strictEqual(view.liftAt(pair, 6, 0, 10), null, "four metres from both lifts");
 process.stdout.write("walk: all checks passed\n");

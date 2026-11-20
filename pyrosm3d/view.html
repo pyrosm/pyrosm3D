@@ -68,7 +68,7 @@
       <li>The views: "Buildings" is the solid model, where the ground and buildings hide what is inside and below them. "See through" turns the model into a map, where the walkways inside buildings and below ground show; those below ground are paler.</li>
       <li>A view with indoor elements also has "Indoor": the indoor mapping alone, without the ground. The floors are plates, one above the other. "Level" shows one level alone. Lifts and moving walkways are dashed lines. Layers that are off at the start are in "Layers".</li>
       <li>"True heights": on, heights are drawn to scale; off, they are drawn taller, so that what lies above and below each other stands apart. "Buildings" and "See through" start with it on, "Indoor" with it off; each remembers its own choice. Walking is always to scale.</li>
-      <li>"Walk" puts you on the ground in the middle of the view. Hold "Forward" to walk the way you look, faster the longer you hold; one finger looks around; a pinch also moves you. You walk on the ground and on the walkways of the network: walk along stairs, an escalator or a ramp and they take you down and up, also below ground. You walk through walls. Switch "Walk" off to fly again from where you stand. With a mouse: drag to look, scroll or the arrow keys to move.</li>
+      <li>"Walk" puts you on the ground in the middle of the view. Hold "Forward" to walk the way you look, faster the longer you hold; one finger looks around; a pinch also moves you. You walk on the ground and on the walkways of the network: walk along stairs, an escalator or a ramp and they take you down and up, also below ground. At a lift, buttons appear that take you to its next stop up or down. You walk through walls. Switch "Walk" off to fly again from where you stand. With a mouse: drag to look, scroll or the arrow keys to move.</li>
       <li>The Tilt and Turn sliders tilt and turn the view; the buttons below them look from above, from the side, with north up, or go back to the start.</li>
       <li>Tap a line or a floor to read what it is.</li>
     </ul>
@@ -99,6 +99,11 @@
   <div class="row" id="moves" hidden>
     <button id="ahead" class="hold" type="button">▲ Forward</button>
     <button id="back" class="hold" type="button">▼ Back</button>
+  </div>
+  <div class="row" id="lifts" hidden>
+    <span>Lift here:</span>
+    <button id="liftUp" type="button">▲ Up</button>
+    <button id="liftDown" type="button">▼ Down</button>
   </div>
   <div class="row">
     <button id="above" type="button">From above</button>
