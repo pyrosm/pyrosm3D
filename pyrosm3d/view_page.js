@@ -15,8 +15,6 @@
   }
   window.addEventListener("error", (event) => report(event.message));
 
-  // Degrees of the field of view from top to bottom, as in a map view
-  const FLY_FOVY = 36.87;
   // Where the indoor view starts: seen from the south-east and above, from so far that
   // the box of the view fits the screen
   const INDOOR_START = {
@@ -47,7 +45,7 @@
     const info = byId("info");
     const canvas = byId("canvas");
     const stage = byId("stage");
-    let state = Object.assign({ fovy: FLY_FOVY }, data.view);
+    let state = Object.assign({ fovy: view.FLY_FOVY }, data.view);
     // the height of the screen in pixels
     const tall = () => canvas.clientHeight || state.height || 800;
     // "True heights" in the views of the city (solid and see-through) and in the indoor
@@ -104,7 +102,16 @@
       width: "100%",
       height: "100%",
       views: new deck.OrbitView({ id: "main", orbitAxis: "Z" }),
-      controller: { doubleClickZoom: false },
+      // one finger moves, a pinch zooms and turns, three fingers tilt; no zoom on a
+      // double tap
+      controller: {
+        type: view.freeController(),
+        dragMode: "pan",
+        touchRotate: true,
+        dragRotate: true,
+        inertia: 300,
+        doubleClickZoom: false,
+      },
       viewState: state,
       pickingRadius: 8,
       layers: view.layersOf(data, shown(), mode, level, stretched()),
@@ -124,6 +131,9 @@
       },
       onError: (error) => report(error && error.message ? error.message : String(error)),
     });
+
+    // a drag with the right mouse button turns the view: no menu of the browser then
+    canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
     function show() {
       instance.setProps({ viewState: state });

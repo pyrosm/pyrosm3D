@@ -1,7 +1,9 @@
+import hashlib
 import json
 import os
 import shutil
 import subprocess
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -9,6 +11,10 @@ from pyrosm import OSM, get_data
 
 from pyrosm3d import In3D
 from pyrosm3d.indoor import indoor_layers
+from pyrosm3d.view import DECK_GL
+
+# The SHA-256 of the deck.gl library at DECK_GL
+DECK_GL_SHA256 = "6ddd95ee72dafb70693f02816accf8a665fa73c40f3fb1a09cb5aa7208377fea"
 
 
 @pytest.fixture(scope="session")
@@ -120,3 +126,21 @@ def run_view():
         return json.loads(done.stdout)
 
     return run
+
+
+@pytest.fixture(scope="session")
+def deck_bundle(tmp_path_factory):
+    """The deck.gl library that the pages load, for the checks that need its own maths:
+    the file named by ``PYROSM3D_DECK_GL``, else downloaded once from ``DECK_GL``;
+    either way checked against its SHA-256 and written to a file of the test session,
+    which the checks run."""
+    local = os.environ.get("PYROSM3D_DECK_GL")
+    if local:
+        content = Path(local).read_bytes()
+    else:
+        with urllib.request.urlopen(DECK_GL, timeout=120) as answer:
+            content = answer.read()
+    assert hashlib.sha256(content).hexdigest() == DECK_GL_SHA256
+    path = tmp_path_factory.mktemp("deck") / "deck.min.js"
+    path.write_bytes(content)
+    return path

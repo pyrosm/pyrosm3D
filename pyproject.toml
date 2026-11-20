@@ -50,6 +50,7 @@ pyrosm3d = [
     "page.js",
     "touch.js",
     "view.html",
+    "view_camera.js",
     "view_layers.js",
     "view_page.js",
 ]

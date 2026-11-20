@@ -46,7 +46,7 @@ from pathlib import Path
 # The deck.gl library that the pages load
 DECK_GL = "https://cdn.jsdelivr.net/npm/deck.gl@8.9.35/dist.min.js"
 # The scripts of a page, in the order they run
-_SCRIPTS = ("view_layers.js", "view_page.js")
+_SCRIPTS = ("view_layers.js", "view_camera.js", "view_page.js")
 # Pixels that the frame of a view is high in a notebook
 _FRAME_HEIGHT = 620
 

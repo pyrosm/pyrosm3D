@@ -1,7 +1,11 @@
 import html
 import json
 import math
+import os
 import re
+import shutil
+import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -381,3 +385,28 @@ def test_the_sliders_buttons_and_layer_list_move_and_switch(tmp_path, run_view):
     assert "lines-Stairs" in _layers(notes[8])
     assert notes[9]["controls"]["tilt"]["value"] == "35"
     assert notes[9]["controls"]["turn"]["value"] == "-160"
+
+
+def test_the_camera_moves_like_a_map(tmp_path, deck_bundle):
+    """With the deck.gl library itself (see ``camera_check.js``): a drag keeps the
+    grabbed point of the ground under the finger from above and from below, and moves
+    the view in the plane of the screen from the side; zooming keeps the point the
+    camera turns around, within the limits; a pinch ends without a glide, also when
+    its last two events come at the same time; a twist of two fingers turns and three
+    fingers tilt; with a mouse,
+    a drag moves and a drag with Shift or the right button turns and tilts; the
+    browser's menu stays off the view."""
+    node = shutil.which("node")
+    if node is None:
+        if os.environ.get("CI"):
+            pytest.fail("the camera is checked with node, which is not installed")
+        pytest.skip("node is not installed")
+    page = View(_page_data()).to_html(tmp_path / "view.html")
+    check = Path(__file__).parent / "camera_check.js"
+    done = subprocess.run(
+        [node, str(check), str(page), str(deck_bundle)],
+        capture_output=True,
+        encoding="utf-8",
+    )
+    assert done.returncode == 0, done.stderr[-2000:]
+    assert done.stdout.strip() == "camera: all checks passed"
