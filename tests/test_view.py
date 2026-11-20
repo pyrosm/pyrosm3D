@@ -387,26 +387,72 @@ def test_the_sliders_buttons_and_layer_list_move_and_switch(tmp_path, run_view):
     assert notes[9]["controls"]["turn"]["value"] == "-160"
 
 
-def test_the_camera_moves_like_a_map(tmp_path, deck_bundle):
-    """With the deck.gl library itself (see ``camera_check.js``): a drag keeps the
-    grabbed point of the ground under the finger from above and from below, and moves
-    the view in the plane of the screen from the side; zooming keeps the point the
-    camera turns around, within the limits; a pinch ends without a glide, also when
-    its last two events come at the same time; a twist of two fingers turns and three
-    fingers tilt; with a mouse,
-    a drag moves and a drag with Shift or the right button turns and tilts; the
-    browser's menu stays off the view."""
+def _walk_data():
+    """The data of a page to walk on: a street at 10 m along y = 0, stairs from it at
+    x = 50 down to 5 m at y = 20, a tunnel on from there, a bridge at 16 m across the
+    tunnel at y = 30, a lift at x = 60 from 10 m to 30 m, a route, and terrain at 10 m
+    with the drawn ground at 9.5 m."""
+
+    def lines(name, *paths, **more):
+        return dict(name=name, kind="lines", colour="#3987e5", metres=0.9,
+                    items=[dict(p=path) for path in paths], **LINE, **more)
+
+    return dict(
+        mode="solid",
+        view=dict(target=[30, 0, 10], rotationX=40, rotationOrbit=20, zoom=1,
+                  minZoom=-3, maxZoom=4.3, minRotationX=-90, maxRotationX=90),
+        tables=dict(names=[], highways=[]),
+        groups=[
+            dict(name="Ground", kind="ground", colour="#dde1e6", visible=True,
+                 grid=dict(x=-200, y=-200, step=100, rows=5, columns=5,
+                           z=[9.5] * 25, t=[10] * 25)),
+            lines("Street", [[0, 0, 10], [100, 0, 10]]),
+            lines("Stairs", [[50, 0, 10], [50, 20, 5]]),
+            lines("Tunnel", [[50, 20, 5], [50, 100, 5]]),
+            lines("Bridge", [[0, 30, 16], [100, 30, 16]]),
+            lines("Lifts", [[60, 0, 10], [60, 0, 30]]),
+            lines("Route", [[0, 50, 10], [100, 50, 10]], always=True),
+            dict(name="Ends", kind="points", colour="#e8002d", width=7.0,
+                 visible=True, items=[dict(c=[0, 0, 10])]),
+        ],
+    )
+
+
+def test_a_walk_gives_the_tilt_slider_its_range_back(tmp_path, run_view):
+    """Walking, the tilt slider spans the look up and down; afterwards the flying range,
+    from below to above when the view gives no limits."""
+    steps = [["set", "walk", True], ["set", "walk", False]]
+    notes = run_view(View(_page_data()), steps, tmp_path)
+    tilts = [note["controls"]["tilt"] for note in notes[1:]]
+    assert [(tilt["min"], tilt["max"]) for tilt in tilts] == [("-60", "60"), ("-90", "90")]
+
+
+@pytest.mark.parametrize("check", ["camera", "walk"])
+def test_the_page_moves_with_the_real_library(check, tmp_path, deck_bundle):
+    """With the deck.gl library itself, ``camera_check.js``: a drag keeps the grabbed
+    point of the ground under the finger from above and from below, and moves the view
+    in the plane of the screen from the side; zooming keeps the point the camera turns
+    around, within the limits; a pinch ends without a glide, also when its last two
+    events come at the same time; a twist of two fingers turns and three fingers tilt;
+    with a mouse, a drag moves and a drag with Shift or the right button turns and
+    tilts; the browser's menu stays off the view. ``walk_check.js``: "Walk" puts the
+    camera on the ground or a walkway at the middle of the view, with a wide field of
+    view, the moves and lift rows, and heights to scale; a drag looks around, a pinch,
+    the wheel, the arrow keys and the Forward and Back steps walk; stairs take the
+    walker down into a tunnel and back up; leaving the walk gives the flying view back
+    over the walker, and "Start view" ends it."""
     node = shutil.which("node")
     if node is None:
         if os.environ.get("CI"):
-            pytest.fail("the camera is checked with node, which is not installed")
+            pytest.fail("the page is checked with node, which is not installed")
         pytest.skip("node is not installed")
-    page = View(_page_data()).to_html(tmp_path / "view.html")
-    check = Path(__file__).parent / "camera_check.js"
+    data = _walk_data() if check == "walk" else _page_data()
+    page = View(data).to_html(tmp_path / "view.html")
+    script = Path(__file__).parent / (check + "_check.js")
     done = subprocess.run(
-        [node, str(check), str(page), str(deck_bundle)],
+        [node, str(script), str(page), str(deck_bundle)],
         capture_output=True,
         encoding="utf-8",
     )
     assert done.returncode == 0, done.stderr[-2000:]
-    assert done.stdout.strip() == "camera: all checks passed"
+    assert done.stdout.strip() == check + ": all checks passed"

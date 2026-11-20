@@ -45,7 +45,7 @@
     const info = byId("info");
     const canvas = byId("canvas");
     const stage = byId("stage");
-    let state = Object.assign({ fovy: view.FLY_FOVY }, data.view);
+    let state = Object.assign({ fovy: view.FLY_FOVY, walk: false }, data.view);
     // the height of the screen in pixels
     const tall = () => canvas.clientHeight || state.height || 800;
     // "True heights" in the views of the city (solid and see-through) and in the indoor
@@ -54,8 +54,9 @@
     const scaleOf = () => (mode === view.INDOOR ? "indoor" : "city");
     // how much taller than to scale the view draws heights when "True heights" is off
     const taller = () => (mode === view.INDOOR ? data.indoor.stretch : data.stretch) || 1;
-    // how much taller than to scale the heights are drawn now
-    const stretched = () => (toScale[scaleOf()] ? 1 : taller());
+    // how much taller than to scale the heights are drawn now; a walker sees them to
+    // scale
+    const stretched = () => (state.walk || toScale[scaleOf()] ? 1 : taller());
     // the zoom at which the screen holds `across` metres in its width and `down` in its
     // height, within the limits of the view
     const zoomThatFits = (across, down) => {
@@ -97,6 +98,16 @@
       turn.value = String(Math.round(((((state.rotationOrbit + 180) % 360) + 360) % 360) - 180));
     };
 
+    // the ground and the walkways that a walker follows (the walkways are sorted out at
+    // the first walk)
+    const ground = data.groups.find((group) => group.kind === "ground" && group.grid);
+    let walkways = null;
+    const network = () => {
+      walkways = walkways || view.walkwaysOf(data.groups);
+      return walkways;
+    };
+    const climb = view.climbOver(network, ground && ground.grid);
+
     const instance = new deck.Deck({
       canvas,
       width: "100%",
@@ -105,7 +116,7 @@
       // one finger moves, a pinch zooms and turns, three fingers tilt; no zoom on a
       // double tap
       controller: {
-        type: view.freeController(),
+        type: view.freeController(climb),
         dragMode: "pan",
         touchRotate: true,
         dragRotate: true,
@@ -130,6 +141,7 @@
         info.textContent = text;
       },
       onError: (error) => report(error && error.message ? error.message : String(error)),
+      onResize: (size) => resized(size.height),
     });
 
     // a drag with the right mouse button turns the view: no menu of the browser then
@@ -139,8 +151,9 @@
       instance.setProps({ viewState: state });
       showTilt();
     }
+    // flying, the view changes as told; walking, it turns where the walker stands
     function look(change) {
-      state = Object.assign({}, state, change);
+      state = state.walk ? view.turnedView(state, change, tall()) : Object.assign({}, state, change);
       show();
     }
     function draw() {
@@ -204,7 +217,7 @@
       level = next === null || next === undefined || next === "" ? null : Number(next);
       levelPick.value = level === null ? "" : String(level);
       const picked = level === null ? null : data.indoor.levels.find((entry) => entry[0] === level);
-      if (picked) {
+      if (picked && !state.walk) {
         state = Object.assign({}, state, {
           target: [state.target[0], state.target[1], picked[1] * stretched()],
         });
@@ -213,16 +226,115 @@
       show();
     }
 
+    // Walking starts at the point that the flying view turns around, on the walkway or
+    // the terrain there, looking the way the view looks; it ends in a flying view that
+    // turns around the walker's feet
+    const stroll = byId("walk");
+    const moves = byId("moves");
+    const flyOnly = [byId("above"), byId("side")];
+    let flying = null;
+    // the zoom at which the point that a walker's view turns around is WALK.reach ahead
+    // of the eye on a screen high pixels high
+    const walkingZoom = (high) =>
+      Math.log2(high / (2 * Math.tan(radians(view.WALK.fovy) / 2) * view.WALK.reach));
+    // a screen of another height (a phone turned): the walker stays where it stands
+    let shownHeight = tall();
+    function resized(high) {
+      if (state.walk && high !== shownHeight) {
+        const eye = view.eyeOf(state, shownHeight);
+        const zoom = walkingZoom(high);
+        state = view.seenFrom(Object.assign({}, state, { zoom, minZoom: zoom, maxZoom: zoom }), eye, high);
+        instance.setProps({ viewState: state });
+      }
+      shownHeight = high;
+    }
+    function walk(on) {
+      if (on === Boolean(state.walk)) return;
+      const high = tall();
+      shownHeight = high;
+      const before = stretched();
+      const WALK = view.WALK;
+      if (on) {
+        flying = {};
+        ["zoom", "rotationX", "minZoom", "maxZoom", "minRotationX", "maxRotationX"].forEach((key) => {
+          flying[key] = state[key];
+        });
+        const feet = view.startingAt(
+          network(), ground && ground.grid, state.target[0], state.target[1], state.target[2] / before
+        );
+        const eye = [state.target[0], state.target[1], feet + WALK.eye];
+        const zoom = walkingZoom(high);
+        const walking = Object.assign({}, state, {
+          walk: true, fovy: WALK.fovy, rotationX: WALK.down, zoom, minZoom: zoom, maxZoom: zoom,
+          minRotationX: -WALK.tilt, maxRotationX: WALK.tilt,
+        });
+        state = view.seenFrom(walking, eye, high);
+      } else {
+        const eye = view.eyeOf(state, high);
+        state = Object.assign({}, state, flying, {
+          walk: false, fovy: view.FLY_FOVY, target: [eye[0], eye[1], eye[2] - WALK.eye],
+        });
+        withHeights(1);
+      }
+      if (stretched() !== before) draw();
+      stroll.checked = on;
+      trueHeights.disabled = on;
+      moves.hidden = !on;
+      flyOnly.forEach((button) => {
+        button.hidden = on;
+      });
+      tilt.min = String(on ? -WALK.tilt : (state.minRotationX === undefined ? -90 : state.minRotationX));
+      tilt.max = String(on ? WALK.tilt : (state.maxRotationX === undefined ? 90 : state.maxRotationX));
+      show();
+    }
+    // the walker goes metres ahead (back when negative)
+    function step(metres) {
+      if (!state.walk) return;
+      state = view.walkedView(state, metres, tall(), climb);
+      show();
+    }
+    // a button that walks for as long as it is held, faster the longer
+    function walksWhileHeld(button, direction) {
+      let since = null;
+      let last = null;
+      let frame = null;
+      const move = (now) => {
+        const seconds = Math.min(0.1, (now - last) / 1000);
+        const speed = Math.min(view.WALK.fast, view.WALK.slow + (view.WALK.gain * (now - since)) / 1000);
+        last = now;
+        step(direction * speed * seconds);
+        frame = requestAnimationFrame(move);
+      };
+      button.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        if (frame !== null) return;
+        since = performance.now();
+        last = since;
+        frame = requestAnimationFrame(move);
+      });
+      ["pointerup", "pointercancel", "pointerleave"].forEach((type) => {
+        button.addEventListener(type, () => {
+          if (frame !== null) cancelAnimationFrame(frame);
+          frame = null;
+        });
+      });
+    }
+    walksWhileHeld(byId("ahead"), 1);
+    walksWhileHeld(byId("back"), -1);
+    stroll.addEventListener("change", () => walk(stroll.checked));
     trueHeights.addEventListener("change", () => setToScale(trueHeights.checked));
     showTilt();
     // the tilt counts degrees above the horizon: 90 from above, 0 from the side,
-    // negative from below
+    // negative from below; walking, it is how far the look is turned down
     tilt.addEventListener("input", () => look({ rotationX: Number(tilt.value) }));
     turn.addEventListener("input", () => look({ rotationOrbit: Number(turn.value) }));
     byId("north").addEventListener("click", () => look({ rotationOrbit: 0 }));
     byId("above").addEventListener("click", () => look({ rotationX: 90, rotationOrbit: 0 }));
     byId("side").addEventListener("click", () => look({ rotationX: 0 }));
-    byId("home").addEventListener("click", () => look(startView()));
+    byId("home").addEventListener("click", () => {
+      walk(false);
+      look(startView());
+    });
     Object.keys(viewButtons).forEach((name) => {
       viewButtons[name].addEventListener("click", () => setMode(name));
     });
@@ -260,8 +372,9 @@
     });
     showMode();
     return {
-      instance, data, look, mode: setMode, level: setLevel, toScale: setToScale,
-      state: () => ({ mode, level, stretch: stretched() }), view: () => state,
+      instance, data, look, walk, step, resized, mode: setMode, level: setLevel,
+      toScale: setToScale, state: () => ({ mode, level, stretch: stretched() }),
+      view: () => state,
     };
   }
 

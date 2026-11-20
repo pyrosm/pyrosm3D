@@ -53,6 +53,7 @@ pyrosm3d = [
     "view_camera.js",
     "view_layers.js",
     "view_page.js",
+    "view_walk.js",
 ]
 
 [tool.black]

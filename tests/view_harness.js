@@ -115,6 +115,7 @@ function controlsNote() {
     note[id] = {
       hidden: control.hidden, on: control.className === "on", checked: control.checked,
       value: control.value, pressed: control.attributes["aria-pressed"],
+      min: control.min, max: control.max,
     };
   });
   note.levelChoices = byId("level").children.map((option) => [option.value, option.textContent]);
