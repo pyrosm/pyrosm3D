@@ -646,10 +646,11 @@ def _near(geometry, middle, radius):
     return radius is None or geometry.distance(middle) <= radius
 
 
-def _add_area_outlines(trace, areas, middle, radius):
-    """Add the outlines of the polygons and the lines among ``areas`` (in metres) that
-    reach within ``radius`` of ``middle``, at the lowest level of their ``level`` tag;
-    points are left out."""
+def _area_lines(areas, middle, radius):
+    """The outlines of the polygons and the lines among ``areas`` (in metres) that
+    reach within ``radius`` of ``middle``, at the lowest level of their ``level`` tag:
+    for each, its x, y (metres from ``middle``) and z, and that level; points are left
+    out."""
     for geometry, tags in zip(areas.geometry, row_tags(areas)):
         if geometry is None or not _near(geometry, middle, radius):
             continue
@@ -664,8 +665,14 @@ def _add_area_outlines(trace, areas, middle, radius):
             else:
                 continue
             for line in lines:
-                points = _line_points(line, z, z, (middle.x, middle.y))
-                trace.add(*points, "area, level %g" % level)
+                yield _line_points(line, z, z, (middle.x, middle.y)), level
+
+
+def _add_area_outlines(trace, areas, middle, radius):
+    """Add the outlines of ``areas`` that reach within ``radius`` of ``middle`` to the
+    ``trace`` (see :func:`_area_lines`)."""
+    for points, level in _area_lines(areas, middle, radius):
+        trace.add(*points, "area, level %g" % level)
 
 
 def _entrances(nodes):
@@ -735,8 +742,8 @@ def network_view(
     edges, nodes=None, center=None, radius=None, route=None, areas=None, dem=None
 ):
     """A 3D view of an indoor network drawn with deck.gl (see :class:`pyrosm3d.View`):
-    the edges and the route that :func:`plot_network` draws, taking the same
-    arguments. Streets and the lines across areas lie white on a
+    the edges, the route, the station entrances and the areas that :func:`plot_network`
+    draws, taking the same arguments. Streets and the lines across areas lie white on a
     flat grey ground at street level (no ground with a terrain model); a line under the
     ground is paler in the see-through view; the lines across areas and the entrances
     are off at the start. The view opens in the solid model over the route, else over
@@ -768,6 +775,8 @@ def network_view(
         points = _edge_points(row.geometry, kind, z_u, z_v, origin, in_metres)
         lines.add(kind, row, edge_tags, z_u, z_v, np.column_stack(points), ground[at])
     groups = lines.groups()
+    if areas is not None:
+        groups += _area_groups(areas.to_crs(crs), middle, radius)
     ends = {
         frozenset((row.u, row.v)): (
             row.u,
@@ -777,6 +786,15 @@ def network_view(
     }
     route_groups = [] if route is None else _route_groups(route, ends)
     groups += route_groups
+    if nodes is not None:
+        entrances, levels = _entrances(nodes)
+        if in_metres:
+            heights = _entrance_heights(entrances, levels, edges, dem)
+        else:
+            heights = metres_of_levels(levels).tolist()
+        groups += _entrance_groups(
+            entrances.to_crs(crs), heights, middle, radius, in_metres
+        )
     paths = [
         item["p"]
         for group in groups
@@ -1062,3 +1080,43 @@ def _route_groups(route, ends):
         ],
     )
     return [line, ends_group]
+
+
+def _area_groups(areas, middle, radius):
+    """The outlines of ``areas`` that reach within ``radius`` of ``middle`` (see
+    :func:`_area_lines`) as a group of lines; no group without such areas."""
+    items = [
+        {
+            "p": np.round(np.column_stack(points), 1).tolist(),
+            "t": "area, level %g" % level,
+        }
+        for points, level in _area_lines(areas, middle, radius)
+    ]
+    return [_lines_group("area", items)] if items else []
+
+
+def _entrance_groups(entrances, heights, middle, radius, in_metres=False):
+    """The station ``entrances`` (in metres) within ``radius`` of ``middle`` as a group
+    of points at their ``heights``: those of their levels, or heights ``in_metres``,
+    which their text then gives (an entrance without a height is left out). The group
+    is off at the start; no group without entrances."""
+    items = []
+    for row, height in zip(entrances.itertuples(), heights):
+        point = row.geometry
+        if not _near(point, middle, radius) or np.isnan(height):
+            continue
+        text = "entrance %s" % row.id + ("\n%.1f m" % height if in_metres else "")
+        place = [point.x - middle.x, point.y - middle.y, float(height)]
+        items.append({"c": [round(value, 1) for value in place], "t": text})
+    if not items:
+        return []
+    return [
+        dict(
+            name="Station entrances",
+            kind="points",
+            colour="#1f2329",
+            width=3.5,
+            visible=False,
+            items=items,
+        )
+    ]
