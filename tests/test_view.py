@@ -1,5 +1,6 @@
 import html
 import json
+import math
 import re
 
 import pytest
@@ -259,3 +260,124 @@ def test_a_page_opens_in_a_city_view_without_indoor_data(tmp_path, run_view):
     del data["indoor"]
     note = run_view(View(data), tmp_path=tmp_path)[0]
     assert "ground-Ground" in _layers(note)
+
+
+def test_the_view_buttons_switch_between_the_views(tmp_path, run_view):
+    """The buttons show the view that is on; the indoor one only with indoor data. A
+    switch keeps the camera where it is. The indoor view shows the level picker, its
+    own background and its own layers in the list (each of them on at the start when
+    it has an indoor look); "Start view" there goes over the middle of its box at the
+    height of the ground, seen from the south-east, from so far that the box fits the
+    screen. Switching back draws the city view again."""
+    steps = [
+        ["press", "viewIndoor"], ["press", "home"], ["press", "viewThrough"],
+        ["press", "viewSolid"],
+    ]
+    notes = run_view(View(_indoor_data("solid")), steps, tmp_path)
+    controls = [note["controls"] for note in notes]
+    assert [c["viewSolid"]["on"] for c in controls] == [True, False, False, False, True]
+    assert [c["viewIndoor"]["pressed"] for c in controls] == [
+        "false", "true", "true", "false", "false",
+    ]
+    assert not controls[0]["viewIndoor"]["hidden"]
+    assert [c["levels"]["hidden"] for c in controls] == [True, False, False, True, True]
+    assert [note["background"] for note in notes] == ["", "#ffffff", "#ffffff", "", ""]
+    assert controls[0]["levelChoices"] == [
+        ["", "All levels"], ["0", "Level 0"], ["1", "Level 1"],
+    ]
+    entries = {entry["name"]: entry for entry in controls[1]["layerList"]}
+    assert entries["Ground (1)"]["hidden"] and entries["Stairs (2)"]["checked"]
+    assert not {e["name"]: e for e in controls[0]["layerList"]}["Ground (1)"]["hidden"]
+    assert "ground-Ground" not in _layers(notes[1])
+    assert "ground-Ground" in _layers(notes[4])
+    assert notes[1]["viewState"]["target"] == notes[0]["viewState"]["target"]
+    start = notes[2]["viewState"]
+    assert start["target"] == [5, 5, 0.0]
+    assert (start["rotationX"], start["rotationOrbit"]) == (27, -43)
+    assert start["zoom"] == pytest.approx(math.log2(min(800 / (1.45 * 20), 800 / 18)))
+    without = _indoor_data("solid")
+    del without["indoor"]
+    assert run_view(View(without), tmp_path=tmp_path)[0]["controls"]["viewIndoor"][
+        "hidden"
+    ]
+
+
+def test_true_heights_draw_each_view_to_scale_or_taller(tmp_path, run_view):
+    """The views of the city start to scale and the indoor view taller, each with its
+    own choice: off in the city, the heights are drawn taller by the data's stretch
+    and the point the view turns around rises with them; the indoor view keeps its
+    own choice. Without a stretch the switch is hidden."""
+    data = _indoor_data("solid")
+    data["stretch"] = 2.0
+    data["view"]["target"] = [0, 0, 3.0]
+    steps = [
+        ["set", "trueHeights", False],
+        ["press", "viewIndoor"],
+        ["set", "trueHeights", True],
+        ["press", "viewSolid"],
+    ]
+    notes = run_view(View(data), steps, tmp_path)
+    assert [n["controls"]["trueHeights"]["checked"] for n in notes] == [
+        True, False, False, True, False,
+    ]
+    assert "modelMatrix" not in _layers(notes[0])["lines-Stairs"]
+    assert _layers(notes[1])["lines-Stairs"]["modelMatrix"][10] == 2.0
+    assert notes[1]["viewState"]["target"] == [0, 0, 6.0]
+    assert _layers(notes[2])["lines-Stairs"]["modelMatrix"][10] == 2.5
+    assert "modelMatrix" not in _layers(notes[3])["lines-Stairs"]
+    assert _layers(notes[4])["lines-Stairs"]["modelMatrix"][10] == 2.0
+    assert notes[0]["controls"]["heights"]["hidden"] is False
+    data = _page_data()
+    assert run_view(View(data), tmp_path=tmp_path)[0]["controls"]["heights"]["hidden"]
+
+
+def test_a_picked_level_draws_that_level_at_its_height(tmp_path, run_view):
+    """Picking a level draws only what is on it and moves the view to the level's
+    height, drawn taller as the view draws heights; "All levels" draws all again."""
+    steps = [["set", "level", "1"], ["set", "level", ""]]
+    notes = run_view(View(_indoor_data()), steps, tmp_path)
+    assert notes[1]["controls"]["level"]["value"] == "1"
+    assert _layers(notes[1])["glass-Walls"]["items"] == 0
+    assert _layers(notes[1])["lines-Lifts"]["items"] == 1
+    assert notes[1]["viewState"]["target"][2] == 4.0 * 2.5
+    assert _layers(notes[2])["glass-Walls"]["items"] == 1
+
+
+def test_the_sliders_buttons_and_layer_list_move_and_switch(tmp_path, run_view):
+    """The sliders tilt and turn the view and follow it, also when the camera moves;
+    the buttons look from above, from the side and north up, and go back to the start;
+    a box in the list of layers switches its layer off and on. A start view with
+    ``fit`` holds that much ground across and, foreshortened by the tilt, up the
+    screen, also when it is turned."""
+    data = _page_data()
+    data["fit"] = [400, 300]
+    steps = [
+        ["set", "tilt", "60"],
+        ["set", "turn", "-90"],
+        ["press", "north"],
+        ["press", "above"],
+        ["press", "side"],
+        ["press", "home"],
+        ["toggle", "Stairs"],
+        ["toggle", "Stairs"],
+        ["camera", {"rotationX": 35, "rotationOrbit": 200}],
+    ]
+    notes = run_view(View(data), steps, tmp_path)
+    views = [note["viewState"] for note in notes]
+    lean = math.sin(math.radians(40))
+    turn = math.radians(20)
+    across = 400 * math.cos(turn) + 300 * math.sin(turn)
+    up = (400 * math.sin(turn) + 300 * math.cos(turn)) * lean
+    assert views[0]["zoom"] == pytest.approx(math.log2(min(800 / across, 800 / up)))
+    assert views[1]["rotationX"] == 60 and views[2]["rotationOrbit"] == -90
+    assert views[3]["rotationOrbit"] == 0 and views[3]["rotationX"] == 60
+    assert (views[4]["rotationX"], views[4]["rotationOrbit"]) == (90, 0)
+    assert views[5]["rotationX"] == 0
+    assert views[6]["rotationX"] == 40 and views[6]["zoom"] == views[0]["zoom"]
+    assert notes[1]["controls"]["tilt"]["value"] == "60"
+    assert notes[2]["controls"]["turn"]["value"] == "-90"
+    assert notes[3]["controls"]["turn"]["value"] == "0"
+    assert "lines-Stairs" not in _layers(notes[7])
+    assert "lines-Stairs" in _layers(notes[8])
+    assert notes[9]["controls"]["tilt"]["value"] == "35"
+    assert notes[9]["controls"]["turn"]["value"] == "-160"

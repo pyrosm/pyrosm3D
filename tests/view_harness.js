@@ -11,6 +11,12 @@
 //   ["layersAt", view, level, stretch] the layers of a view with every group switched
 //                                    on, on one level (null: all), heights drawn
 //                                    stretch times taller
+//   ["press", element id]            a click on a button
+//   ["set", element id, value]       a slider or picker set to a value ("input" and
+//                                    "change" events), or a checkbox to true or false
+//   ["toggle", layer name]           the checkbox of a layer in the list of layers
+//   ["camera", view state]           the camera moved by the controller to a view
+//                                    state with these values
 // With "nodeck" the page runs without the library.
 const fs = require("fs");
 const vm = require("vm");
@@ -37,8 +43,11 @@ function element(id) {
     style: {},
     children: [],
     listeners: {},
+    attributes: {},
     appendChild(child) { this.children.push(child); },
+    setAttribute(name, value) { this.attributes[name] = value; },
     addEventListener(type, listener) { this.listeners[type] = listener; },
+    fire(type) { if (this.listeners[type]) this.listeners[type]({ preventDefault() {} }); },
   };
 }
 const byId = (id) => {
@@ -95,6 +104,26 @@ function layerNote(layer) {
   return note;
 }
 
+// The controls of the page as they show: hidden, pressed, checked, value; the levels
+// to pick from and the list of layers
+const CONTROLS = ["viewSolid", "viewThrough", "viewIndoor", "levels", "level", "heights",
+  "trueHeights", "tilt", "turn"];
+function controlsNote() {
+  const note = {};
+  CONTROLS.forEach((id) => {
+    const control = byId(id);
+    note[id] = {
+      hidden: control.hidden, on: control.className === "on", checked: control.checked,
+      value: control.value, pressed: control.attributes["aria-pressed"],
+    };
+  });
+  note.levelChoices = byId("level").children.map((option) => [option.value, option.textContent]);
+  note.layerList = byId("layers").children.map((label) => ({
+    name: label.children[2].textContent, hidden: label.hidden, checked: label.children[0].checked,
+  }));
+  return note;
+}
+
 function noted(extra) {
   const props = made ? made.props : {};
   return Object.assign(
@@ -104,6 +133,7 @@ function noted(extra) {
       info: byId("info").hidden ? null : byId("info").textContent,
       error: byId("error").hidden ? null : byId("error").textContent,
       background: byId("stage").style.background || "",
+      controls: controlsNote(),
     },
     extra || {}
   );
@@ -119,6 +149,22 @@ const actions = {
     const data = view.started.data;
     const shown = new Map(data.groups.map((group) => [group, true]));
     return { at: view.layersOf(data, shown, mode, level, stretch).map(layerNote) };
+  },
+  press(id) { byId(id).fire("click"); },
+  camera(change) {
+    made.props.onViewStateChange({ viewState: Object.assign({}, made.props.viewState, change) });
+  },
+  set(id, value) {
+    const control = byId(id);
+    if (typeof value === "boolean") control.checked = value;
+    else control.value = String(value);
+    control.fire("input");
+    control.fire("change");
+  },
+  toggle(name) {
+    const label = byId("layers").children.find((entry) => entry.children[2].textContent.startsWith(name + " ("));
+    label.children[0].checked = !label.children[0].checked;
+    label.children[0].fire("change");
   },
 };
 

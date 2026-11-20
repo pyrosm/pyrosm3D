@@ -19,7 +19,14 @@ The data of a view is a dict that the page script reads:
     ``highways``.
 ``view``
     Where the camera starts: deck.gl's view state of an orbit view (``target``,
-    ``rotationX``, ``rotationOrbit``, ``zoom``) and its limits.
+    ``rotationX``, ``rotationOrbit``, ``zoom``) and its limits (``minZoom``,
+    ``maxZoom``, ``minRotationX``, ``maxRotationX``).
+``fit`` (optional)
+    The metres of ground from west to east and from south to north that the start
+    view holds; the page then picks the zoom from the size of the screen.
+``stretch`` (optional)
+    How much taller than to scale the views of the city draw the heights when "True
+    heights" is off; without it they are always to scale.
 ``mode``
     The view that the page opens in: ``"solid"`` (the ground hides what is below it),
     ``"through"`` (a map, the network over and under it) or ``"indoor"`` (without the
