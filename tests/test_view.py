@@ -128,8 +128,9 @@ def test_the_page_draws_every_kind_of_group_in_each_view(tmp_path, run_view):
 
 def test_a_tap_shows_what_an_item_is(tmp_path, run_view):
     """A tap on a line of the network shows its name, its element with its highway
-    value and its levels; one on another item shows its text; a tap where there is
-    nothing hides the panel. The tooltip has the same text."""
+    value and its levels; one on another item shows its text; either with its heights
+    in metres when it has them; a tap where there is nothing hides the panel. The
+    tooltip has the same text."""
     steps = [
         ["click", "lines-Stairs", 1],
         ["click", "lines-Stairs", 0],
@@ -137,11 +138,13 @@ def test_a_tap_shows_what_an_item_is(tmp_path, run_view):
         ["miss"],
         ["tooltip", "lines-Stairs", 0],
     ]
-    notes = run_view(View(_page_data()), steps, tmp_path=tmp_path)
+    data = _page_data()
+    _group(data, "Route")["items"][0]["m"] = [0.0, 4.25]
+    notes = run_view(View(data), steps, tmp_path=tmp_path)
     assert notes[0]["info"] is None and notes[0]["error"] is None
     assert notes[1]["info"] == "Main street\nnode 8 · footway\nlevel -1"
     assert notes[2]["info"] == "way 7 · steps\nlevels 0 → 1"
-    assert notes[3]["info"] == "route"
+    assert notes[3]["info"] == "route\n0.0 to 4.3 m"
     assert notes[4]["info"] is None
     assert notes[5]["tooltip"] == {"text": "way 7 · steps\nlevels 0 → 1"}
     assert notes[0]["deck"]["views"] == {"id": "main", "orbitAxis": "Z"}

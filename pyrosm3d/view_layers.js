@@ -79,18 +79,24 @@
   }
 
   // What a tapped item is: its own text, or for a line of the network its name, its
-  // element (e: 1 for a relation, 2 for a node, such as a lift) with its highway
-  // value, and its levels (names and highway values are numbers into the tables of
-  // the data)
+  // element (e: 1 for a relation, 2 for a node, such as a lift) with its highway value
+  // and its levels (names and highway values are numbers into the tables of the data);
+  // then, in metres, its lowest and highest height (m)
   function textOf(item, tables) {
-    if (!item) return "";
-    if (item.t !== undefined) return item.t;
-    if (item.w === undefined) return "";
+    if (!item || (item.t === undefined && item.w === undefined)) return "";
     const lines = [];
-    if (item.n !== undefined) lines.push(tables.names[item.n]);
-    lines.push(["way ", "relation ", "node "][item.e || 0] + item.w + " · " + tables.highways[item.h]);
-    if (item.a !== undefined) {
-      lines.push(item.c === undefined ? "level " + item.a : "levels " + item.a + " → " + item.c);
+    if (item.t !== undefined) {
+      lines.push(item.t);
+    } else {
+      if (item.n !== undefined) lines.push(tables.names[item.n]);
+      lines.push(["way ", "relation ", "node "][item.e || 0] + item.w + " · " + tables.highways[item.h]);
+      if (item.a !== undefined) {
+        lines.push(item.c === undefined ? "level " + item.a : "levels " + item.a + " → " + item.c);
+      }
+    }
+    if (item.m) {
+      const [low, high] = item.m.map((height) => height.toFixed(1));
+      lines.push(low === high ? low + " m" : low + " to " + high + " m");
     }
     return lines.join("\n");
   }

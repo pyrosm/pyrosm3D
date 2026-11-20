@@ -10,6 +10,9 @@ UNDERGROUND_FLOOR_HEIGHT = 6.0
 WALL_HEIGHT = 0.4 * FLOOR_HEIGHT
 # Metres drawn around the indoor areas
 VIEW_MARGIN = 10.0
+# How much taller than to scale the views draw heights when they are not drawn to scale,
+# so that what lies above and below each other stands apart
+HEIGHT_STRETCH = 2.2
 # Metres of floor left open across the stairs, escalators and moving walkways that
 # rise through it. OSM has no widths for them: 1.6 m is about the overall width of an
 # escalator with a 1 m step, and the width of stairs is assumed.

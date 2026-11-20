@@ -42,6 +42,7 @@ from pyrosm3d.styles import (
     COLUMN_STYLES,
     DOOR_STYLE,
     FLOOR_HEIGHT,
+    HEIGHT_STRETCH,
     HOVER_LABEL,
     LEVEL_FLOOR_COLOUR,
     LEVEL_OUTLINE_COLOUR,
@@ -64,8 +65,6 @@ _NETWORK_LIFT = 0.15
 _POI_LIFT = 0.3
 # A floor keeps its colour from every direction
 _FLAT_LIGHT = dict(ambient=1, diffuse=0, specular=0, roughness=1, fresnel=0)
-# How much taller than to scale the levels are drawn, so that they stand apart
-_HEIGHT_STRETCH = 2.2
 
 
 def plot_indoor(elements, edges=None, nodes=None, buildings=None, level=None):
@@ -495,7 +494,7 @@ def _layout(box, levels, between=()):
     longest = max(width, height)
     labelled = [lv for lv in levels if lv.is_integer() or lv in between]
     z_range = [levels[0] * FLOOR_HEIGHT - 1, levels[-1] * FLOOR_HEIGHT + 2]
-    z_aspect = (z_range[1] - z_range[0]) * _HEIGHT_STRETCH / longest
+    z_aspect = (z_range[1] - z_range[0]) * HEIGHT_STRETCH / longest
     z_aspect = min(1.1, max(0.12, z_aspect))
     return dict(
         scene=dict(
