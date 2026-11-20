@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import types
 from pathlib import Path
 
@@ -97,24 +98,27 @@ def test_a_view_in_a_notebook_is_a_frame_of_its_page():
     assert html.unescape(held) == view.to_html()
 
 
-@pytest.mark.parametrize("in_notebook", [True, False])
-def test_show_displays_in_a_notebook_and_opens_a_browser_elsewhere(
-    in_notebook, monkeypatch
-):
+@pytest.mark.parametrize(
+    "where", ["notebook", "IPython without a kernel", "no IPython"]
+)
+def test_show_displays_in_a_notebook_and_opens_a_browser_elsewhere(where, monkeypatch):
     """In a notebook (an IPython shell with a kernel) show displays the view as the
-    cell's output; elsewhere it writes the page to a temporary file and opens it in
-    the web browser."""
-    import IPython
-    import IPython.display
-
+    cell's output; elsewhere, also without IPython, it writes the page to a temporary
+    file and opens it in the web browser."""
     shown, opened = [], []
-    shell = types.SimpleNamespace(kernel=object()) if in_notebook else None
-    monkeypatch.setattr(IPython, "get_ipython", lambda: shell)
-    monkeypatch.setattr(IPython.display, "display", shown.append)
+    shell = types.SimpleNamespace(kernel=object()) if where == "notebook" else None
+    ipython = types.ModuleType("IPython")
+    ipython.get_ipython = lambda: shell
+    ipython.display = types.ModuleType("IPython.display")
+    ipython.display.display = shown.append
+    modules = {"IPython": ipython, "IPython.display": ipython.display}
+    for name, module in modules.items():
+        blocked = where == "no IPython"
+        monkeypatch.setitem(sys.modules, name, None if blocked else module)
     monkeypatch.setattr("webbrowser.open", opened.append)
     view = View(_page_data())
     path = view.show()
-    if in_notebook:
+    if where == "notebook":
         assert shown == [view] and opened == [] and path is None
     else:
         assert shown == [] and opened == [path.as_uri()]
