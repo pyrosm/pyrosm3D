@@ -14,7 +14,7 @@ from pyrosm3d.indoor import indoor_layers
 from pyrosm3d.network import EDGE_NAMES, _edge_kinds, end_levels_text
 from pyrosm3d.styles import AREA_STYLES, DOOR_STYLE, POI_STYLE
 from pyrosm3d.tags import element_keys, row_tags
-from pyrosm3d.touch import package_text
+from pyrosm3d.view import package_text
 
 
 def to_html(

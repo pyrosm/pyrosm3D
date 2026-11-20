@@ -2,15 +2,11 @@
 controls for touch screens."""
 
 import inspect
-from importlib import resources
 
 import plotly.graph_objects as go
 import plotly.io
 
-
-def package_text(name):
-    """The text of a file that the package holds, such as ``"touch.js"``."""
-    return resources.files("pyrosm3d").joinpath(name).read_text(encoding="utf-8")
+from pyrosm3d.view import package_text
 
 
 class TouchFigure(go.Figure):

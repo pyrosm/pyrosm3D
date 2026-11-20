@@ -96,3 +96,27 @@ def run_scripts():
         return json.loads(done.stdout)
 
     return run
+
+
+@pytest.fixture(scope="session")
+def run_view():
+    """A function that runs the scripts of the page of a ``pyrosm3d.View`` in node,
+    with ``view_harness.js`` and stand-ins for deck.gl, and returns what the page
+    showed after it started and after each of the ``steps`` (see the harness)."""
+
+    def run(view, steps=(), tmp_path=None, deck=True):
+        node = shutil.which("node")
+        if node is None:
+            if os.environ.get("CI"):
+                pytest.fail("the scripts are tested with node, which is not installed")
+            pytest.skip("node is not installed")
+        path = view.to_html(tmp_path / "view.html")
+        harness = Path(__file__).parent / "view_harness.js"
+        command = [node, str(harness), str(path), json.dumps(list(steps))]
+        command += [] if deck else ["nodeck"]
+        done = subprocess.run(
+            command, capture_output=True, encoding="utf-8", check=True
+        )
+        return json.loads(done.stdout)
+
+    return run

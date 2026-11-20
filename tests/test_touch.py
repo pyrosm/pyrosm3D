@@ -3,7 +3,8 @@ import pytest
 
 from pyrosm3d import plot_network
 from pyrosm3d.figure import layers_figure
-from pyrosm3d.touch import TouchFigure, package_text
+from pyrosm3d.touch import TouchFigure
+from pyrosm3d.view import package_text
 
 
 @pytest.fixture(scope="module")
