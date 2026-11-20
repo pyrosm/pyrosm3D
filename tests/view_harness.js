@@ -8,8 +8,9 @@
 //   ["click", layer id, item number]  a tap on an item of a layer
 //   ["miss"]                          a tap where there is nothing
 //   ["tooltip", layer id, item number]
-//   ["layersAt", view, stretch]       the layers of a view with every group switched
-//                                    on, heights drawn stretch times taller
+//   ["layersAt", view, level, stretch] the layers of a view with every group switched
+//                                    on, on one level (null: all), heights drawn
+//                                    stretch times taller
 // With "nodeck" the page runs without the library.
 const fs = require("fs");
 const vm = require("vm");
@@ -102,6 +103,7 @@ function noted(extra) {
       viewState: props.viewState || null,
       info: byId("info").hidden ? null : byId("info").textContent,
       error: byId("error").hidden ? null : byId("error").textContent,
+      background: byId("stage").style.background || "",
     },
     extra || {}
   );
@@ -112,11 +114,11 @@ const actions = {
   click(id, at) { made.props.onClick({ object: layerOf(id).props.data[at] }); },
   miss() { made.props.onClick({ object: null }); },
   tooltip(id, at) { return { tooltip: made.props.getTooltip({ object: layerOf(id).props.data[at] }) }; },
-  layersAt(mode, stretch) {
+  layersAt(mode, level, stretch) {
     const view = context.pyrosm3d;
     const data = view.started.data;
     const shown = new Map(data.groups.map((group) => [group, true]));
-    return { at: view.layersOf(data, shown, mode, stretch).map(layerNote) };
+    return { at: view.layersOf(data, shown, mode, level, stretch).map(layerNote) };
   },
 };
 

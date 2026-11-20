@@ -7,9 +7,13 @@ The data of a view is a dict that the page script reads:
     page's list of layers, one name for each group), a ``kind``, a ``colour``
     (``"#rrggbb"``), whether it is ``visible`` at the start, and the style of its kind.
     The kinds: ``ground`` (a ``grid`` of heights, or ``items`` with rings ``r``),
-    ``lines`` (paths ``p``) and ``points`` (a place ``c``). Points are
-    ``[x, y, z]`` in metres from the middle of the data, x east, y north, z up. An item
-    may have a text ``t``.
+    ``floors`` (rings ``r`` of a kind ``k`` among the group's ``colours``),
+    ``outlines`` and ``lines`` (paths ``p``), ``glass`` (see-through blocks: rings
+    ``r`` and a height ``h``) and ``points`` (a place ``c``). Points are ``[x, y, z]``
+    in metres from the middle of the data, x east, y north, z up. An item may have a
+    text ``t``, its level ``l`` (a line: its levels ``ls``, else its first level
+    ``a``), and ``o`` when the indoor view leaves it out. A group with a style for the
+    indoor view (``plot``: colour, width in pixels and dash) is on there at the start.
 ``tables``
     The texts that the items of the network refer to by number: ``names`` and
     ``highways``.
@@ -17,8 +21,13 @@ The data of a view is a dict that the page script reads:
     Where the camera starts: deck.gl's view state of an orbit view (``target``,
     ``rotationX``, ``rotationOrbit``, ``zoom``) and its limits.
 ``mode``
-    The view that the page opens in: ``"solid"`` (the ground hides what is below it)
-    or ``"through"`` (a map, the network over and under it).
+    The view that the page opens in: ``"solid"`` (the ground hides what is below it),
+    ``"through"`` (a map, the network over and under it) or ``"indoor"`` (without the
+    ground; the floors are plates, and the heights are drawn taller).
+``indoor``
+    On a page with indoor elements: the ``box`` of the indoor view, its ``levels``
+    (each a level and its height), the height of the ``ground``, its ``background``
+    colour and how much taller than to scale it draws the heights (``stretch``).
 """
 
 import html
