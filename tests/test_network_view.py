@@ -3,9 +3,9 @@ import pandas as pd
 import pytest
 from shapely.geometry import LineString, Point
 
-from pyrosm3d import network_heights
+from pyrosm3d import network_heights, plot_network
 from pyrosm3d.dem import sample_dem
-from pyrosm3d.network import _STYLES, network_view
+from pyrosm3d.network import _STYLES
 
 
 def _groups(view):
@@ -37,7 +37,7 @@ def _texts(view, name):
     return found
 
 
-def test_network_view_draws_an_indoor_network(helsinki_indoor):
+def test_plot_network_draws_an_indoor_network(helsinki_indoor):
     """Each kind of edge is a group of lines; the lift of node 2039713549 is a
     vertical line from level -2, 12 m below the ground floor (6 m a level below it),
     to level 0; a radius keeps what reaches near the center, where the view starts,
@@ -56,7 +56,7 @@ def test_network_view_draws_an_indoor_network(helsinki_indoor):
     point = areas.iloc[:1].assign(geometry=[Point(near["center"])])
     areas = pd.concat([areas, point])
     route = [2039713539, 2039713549, -2039713549001, 2039713561, 1]
-    view = network_view(edges, nodes, route=route, areas=areas, **near)
+    view = plot_network(edges, nodes, route=route, areas=areas, **near)
     groups = _groups(view)
     assert {"Escalators", "Stairs", "Lifts", "Platforms", "Route"} <= set(groups)
     assert {"Area outlines", "Station entrances", "Lines across areas"} <= set(groups)
@@ -69,7 +69,7 @@ def test_network_view_draws_an_indoor_network(helsinki_indoor):
     middle = (route_xy.min(axis=0) + route_xy.max(axis=0)) / 2
     assert view.data["view"]["target"][:2] == pytest.approx(middle, abs=0.06)
     assert view.data["view"]["rotationOrbit"] == 20 and view.data["mode"] == "solid"
-    centred = network_view(edges, nodes, **near).data
+    centred = plot_network(edges, nodes, **near).data
     assert centred["view"]["target"] == [0.0, 0.0, 0.0] and centred["fit"] == [420.0] * 2
     assert centred["view"]["rotationOrbit"] == 0
     ground = groups["Ground"]["grid"]
@@ -80,7 +80,7 @@ def test_network_view_draws_an_indoor_network(helsinki_indoor):
     paths = [item["p"] for item in line["items"]]
     assert [item["c"] for item in ends["items"]] == [paths[0][0], paths[-1][-1]]
     assert line["always"] and line["rounded"]
-    moved = network_view(edges.to_crs(3067), route=route, **near)
+    moved = plot_network(edges.to_crs(3067), route=route, **near)
     assert _heights(moved, "Route") == _heights(view, "Route")
     assert line["colour"] == ends["colour"] == "#e8002d"
     assert groups["Platforms"]["colour"] == "#199e70"
@@ -93,14 +93,14 @@ def test_network_view_draws_an_indoor_network(helsinki_indoor):
     area = [p for item in groups["Area outlines"]["items"] for p in item["p"]]
     assert min(p[2] for p in area) < 0 and [0.0, 0.0] not in [p[:2] for p in area]
     repeated = pd.concat([edges, edges.iloc[:1]]).drop(columns=["u", "v"])
-    everything = _groups(network_view(repeated, nodes, route=route))
+    everything = _groups(plot_network(repeated, nodes, route=route))
     assert "Route" not in everything
     walkways = everything["Walkways at street level"]["items"]
     assert len(walkways) > len(groups["Walkways at street level"]["items"])
     assert max(abs(c) for item in walkways for p in item["p"] for c in p[:2]) > 200
 
 
-def test_network_view_draws_heights_in_metres(helsinki_centre, helsinki_dem):
+def test_plot_network_draws_heights_in_metres(helsinki_centre, helsinki_dem):
     """With a terrain model the centre of Helsinki is drawn at the heights of
     network_heights: a lift from level -2 to the ground floor is a vertical line
     between the heights of its two ends, 12 m apart, which a tap on it shows; the
@@ -111,7 +111,7 @@ def test_network_view_draws_heights_in_metres(helsinki_centre, helsinki_dem):
     nodes, edges = helsinki_centre
     found = network_heights(edges, helsinki_dem).set_index("id")
     lift, entrance, on_ground = 2039713549, 249350774, 2261292460
-    view = network_view(edges, nodes, route=[-lift * 1000 - 1, lift], dem=helsinki_dem)
+    view = plot_network(edges, nodes, route=[-lift * 1000 - 1, lift], dem=helsinki_dem)
     groups = _groups(view)
     assert "Ground" not in groups
     ends = found.loc[lift, ["u_height", "v_height"]].round(2).tolist()
@@ -132,14 +132,14 @@ def test_network_view_draws_heights_in_metres(helsinki_centre, helsinki_dem):
         heights = sample_dem(longitudes, latitudes, helsinki_dem)
         return np.where(longitudes > 24.937, np.nan, heights)
 
-    west = _groups(network_view(edges, nodes, dem=west_only))
+    west = _groups(plot_network(edges, nodes, dem=west_only))
     assert 0 < len(west["Station entrances"]["items"]) < len(texts)
     streets = "Walkways at street level"
     assert 0 < len(west[streets]["items"]) < len(groups[streets]["items"])
     assert all(p[2] == p[2] for item in west[streets]["items"] for p in item["p"])
 
 
-def test_network_view_draws_a_tunnel_with_an_entrance():
+def test_plot_network_draws_a_tunnel_with_an_entrance():
     """An entrance on level -1 in the middle of a tunnel between two streets at 10 m
     and 14 m, under a hill of 100 m: the tunnel has no level columns and is drawn on
     level -1, so the entrance is at the tunnel's height there, 12 m, not on the hill.
@@ -169,21 +169,21 @@ def test_network_view_draws_a_tunnel_with_an_entrance():
         east = (longitudes - 24.94) * 1e3
         return np.where(east < 0.5, 10.0, np.where(east < 1.5, 100.0, 14.0))
 
-    entrances = _groups(network_view(edges, nodes, dem=hill))["Station entrances"]
+    entrances = _groups(plot_network(edges, nodes, dem=hill))["Station entrances"]
     assert [item["c"][2] for item in entrances["items"]] == pytest.approx([12.0])
     assert [item["t"] for item in entrances["items"]] == ["entrance 3\n12.0 m"]
 
-    by_levels = network_view(edges.iloc[1:3], nodes)
+    by_levels = plot_network(edges.iloc[1:3], nodes)
     tunnel = _groups(by_levels)["Walkways on other levels"]["items"]
     assert [[p[2] for p in item["p"]] for item in tunnel] == [[-6.0, -6.0]] * 2
     assert all(item["b"] == 1 for item in tunnel)
     assert _groups(by_levels)["Station entrances"]["items"][0]["c"][2] == -6.0
-    nothing = network_view(edges, center=(25.0, 60.17), radius=10)
+    nothing = plot_network(edges, center=(25.0, 60.17), radius=10)
     assert list(_groups(nothing)) == ["Ground"]
     assert nothing.data["view"]["target"] == [0.0, 0.0, 0.0]
 
 
-def test_network_view_marks_a_whole_merged_edge_below_ground():
+def test_plot_network_marks_a_whole_merged_edge_below_ground():
     """An edge of a simplified graph that is kept whole, as one that climbs from level
     to level is, has its own text naming both its ways, and is marked below ground
     like the others: here stairs from level -2 to level -1, 12 m and 6 m under street
@@ -194,11 +194,11 @@ def test_network_view_marks_a_whole_merged_edge_below_ground():
     line = LineString([(24.94, 60.17), (24.941, 60.17), (24.942, 60.17)])
     graph.add_edge(1, 2, geometry=line, id=[13, 14], name=["B", "C"],
                    u_level=-2.0, v_level=-1.0, vertical="stairs")
-    item = _groups(network_view(graph))["Stairs"]["items"][0]
+    item = _groups(plot_network(graph))["Stairs"]["items"][0]
     assert item["t"] == "B;C\nways 13, 14 · stairs\nlevels -2 → -1" and item["b"] == 1
 
 
-def test_network_view_keeps_edges_without_ids_apart():
+def test_plot_network_keeps_edges_without_ids_apart():
     """Edges without an id, here missing in different ways, that go on from each other
     stay lines of their own, each with a text of its own and no id, so the page can
     hold them; an infinite radius draws everything, as no radius does."""
@@ -214,12 +214,12 @@ def test_network_view_keeps_edges_without_ids_apart():
         geometry=lines,
         crs=4326,
     )
-    view = network_view(edges)
+    view = plot_network(edges)
     items = _groups(view)["Walkways at street level"]["items"]
     assert [item["t"] for item in items] == [
         "A\nstreet\nlevel 0", "B\nstreet\nlevel 0", "C\nstreet\nlevel 0"
     ]
     assert not any("w" in item for item in items) and view.to_html()
-    view = network_view(edges.drop(columns="id"))
-    endless = network_view(edges, radius=float("inf")).data
+    view = plot_network(edges.drop(columns="id"))
+    endless = plot_network(edges, radius=float("inf")).data
     assert endless["fit"] == view.data["fit"] and endless["groups"] == view.data["groups"]

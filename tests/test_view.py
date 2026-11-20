@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import types
 from pathlib import Path
 
 import pytest
@@ -94,6 +95,31 @@ def test_a_view_in_a_notebook_is_a_frame_of_its_page():
     assert frame.startswith("<iframe srcdoc=")
     held = re.search(r'srcdoc="(.*?)" style', frame, re.S)[1]
     assert html.unescape(held) == view.to_html()
+
+
+@pytest.mark.parametrize("in_notebook", [True, False])
+def test_show_displays_in_a_notebook_and_opens_a_browser_elsewhere(
+    in_notebook, monkeypatch
+):
+    """In a notebook (an IPython shell with a kernel) show displays the view as the
+    cell's output; elsewhere it writes the page to a temporary file and opens it in
+    the web browser."""
+    import IPython
+    import IPython.display
+
+    shown, opened = [], []
+    shell = types.SimpleNamespace(kernel=object()) if in_notebook else None
+    monkeypatch.setattr(IPython, "get_ipython", lambda: shell)
+    monkeypatch.setattr(IPython.display, "display", shown.append)
+    monkeypatch.setattr("webbrowser.open", opened.append)
+    view = View(_page_data())
+    path = view.show()
+    if in_notebook:
+        assert shown == [view] and opened == [] and path is None
+    else:
+        assert shown == [] and opened == [path.as_uri()]
+        assert path.read_text(encoding="utf-8") == view.to_html()
+        path.unlink()
 
 
 def test_the_page_draws_every_kind_of_group_in_each_view(tmp_path, run_view):

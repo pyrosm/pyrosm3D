@@ -9,7 +9,6 @@ from pyrosm3d.network import (
     _edge_text,
     _edges_by_way,
     _graph_frames,
-    network_view,
 )
 from test_network_view import _groups, _heights, _texts
 
@@ -37,7 +36,7 @@ def test_plot_network_draws_graphs(helsinki_indoor, graph_type):
     )
     tunnel_edge = (1514631272, 173248856)
     route = [*tunnel_edge, 1369465828, 1369465823]
-    view = network_view(graph, center=(24.9415, 60.1712), radius=200, route=route)
+    view = plot_network(graph, center=(24.9415, 60.1712), radius=200, route=route)
     groups = _groups(view)
     assert {"Escalators", "Lifts", "Platforms", "Station entrances"} <= set(groups)
     n_edges = graph.ecount() if graph_type == "igraph" else graph.number_of_edges()
@@ -81,23 +80,23 @@ def test_plot_network_draws_a_graph_made_by_hand():
     graph.add_edge(2, 1, geometry=line.reverse(), id=10)
     graph.add_edge(1, 2, geometry=line, id=11, railway="platform")
     kinds = ["Ground", "Walkways at street level", "Platforms"]
-    groups = _groups(network_view(graph))
+    groups = _groups(plot_network(graph))
     assert list(groups) == kinds
     assert len(groups["Walkways at street level"]["items"]) == 1
     nx.set_node_attributes(graph, {1: 24.94, 2: 24.941}, "x")
     nx.set_node_attributes(graph, {1: 60.17, 2: 60.17}, "y")
-    assert list(_groups(network_view(graph))) == kinds
+    assert list(_groups(plot_network(graph))) == kinds
     nx.set_node_attributes(graph, {1: "subway_entrance"}, "railway")
-    groups = _groups(network_view(graph, center=(24.94, 60.17), radius=0))
+    groups = _groups(plot_network(graph, center=(24.94, 60.17), radius=0))
     assert list(groups) == kinds + ["Station entrances"]
     graph.add_edge(2, 3, geometry=LineString([(24.941, 60.17), (24.95, 60.17)]), id=12)
     nx.set_node_attributes(graph, {3: 24.95}, "x")
     nx.set_node_attributes(graph, {3: 60.17}, "y")
-    view = network_view(graph, center=(24.94, 60.17), radius=0, route=[1, 2, 3])
+    view = plot_network(graph, center=(24.94, 60.17), radius=0, route=[1, 2, 3])
     walkways = _groups(view)["Walkways at street level"]["items"]
     assert max(p[0] for item in walkways for p in item["p"]) < 100
     assert max(p[0] for item in _groups(view)["Route"]["items"] for p in item["p"]) > 500
-    view = network_view(graph, dem=lambda lons, lats: 100 * (lons - 24.94))
+    view = plot_network(graph, dem=lambda lons, lats: 100 * (lons - 24.94))
     assert _heights(view, "Walkways at street level") == [[0, 0.1], [0.1, 1.0]]
     assert _heights(view, "Platforms") == [[0, 0.1]]
     assert [i["c"][2] for i in _groups(view)["Station entrances"]["items"]] == [0]
@@ -166,7 +165,7 @@ def test_plot_network_draws_merged_edges_made_by_hand():
         (2, 3),
         (3, -5),
     ]
-    view = network_view(graph, route=[-5, 3, 2, 1])
+    view = plot_network(graph, route=[-5, 3, 2, 1])
     assert _texts(view, "Walkways at street level") == {
         "A\nway 10 · street\nlevel 0",
         "A\nway 12 · street\nlevel 0",
@@ -183,18 +182,18 @@ def test_plot_network_draws_merged_edges_made_by_hand():
         east = (longitudes - 24.94) * 1e3
         return np.where(east < 1.2, 10.0, np.where(east < 1.8, 100.0, 14.0))
 
-    tunnel = _heights(network_view(graph, dem=hill), "Walkways on other levels")
+    tunnel = _heights(plot_network(graph, dem=hill), "Walkways on other levels")
     assert tunnel == [pytest.approx([10, 12, 14], abs=0.05)]
 
     bend = LineString([(24.943, 60.17), (24.9415, 60.171), (24.94, 60.17)])
     graph.add_edge(2, 1, geometry=bend, id=16, length=100.0)
     assert _edges_by_way(_graph_frames(graph)[0])[1] == {}
-    assert _heights(network_view(graph, route=[1, 2]), "Route") == [[0, 0, 0]]
+    assert _heights(plot_network(graph, route=[1, 2]), "Route") == [[0, 0, 0]]
 
     def south(longitudes, latitudes):
         return np.where(latitudes < 60.1705, hill(longitudes, latitudes), np.nan)
 
-    assert "Route" not in _groups(network_view(graph, route=[1, 2], dem=south))
+    assert "Route" not in _groups(plot_network(graph, route=[1, 2], dem=south))
 
 
 def test_plot_network_refuses_what_it_cannot_draw():

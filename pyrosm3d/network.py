@@ -1,19 +1,18 @@
-"""A 3D view of an indoor network, drawn with plotly.
+"""A 3D view of an indoor network, drawn with deck.gl (see :class:`pyrosm3d.View`).
 
 The edges of :meth:`pyrosm.OSM.get_network` or :meth:`pyrosm.OSM.get_graph` with
 ``indoor_elements=True`` are drawn at their levels: walkways, stairs, escalators,
-moving walkways, lifts, platforms and the lines across areas, each kind a legend entry
-that hides or shows it.
-A walkway tagged with several levels is drawn flat at the lowest, dotted; an edge
-without a level at its layer when that is below street level (a tunnel at least one
-below), else at street level. The view is true to scale: a level is drawn 4 m from
-the next above the ground floor and 6 m below it
-(:func:`pyrosm3d.styles.metres_of_levels`), and the vertical axis names the levels.
-An edge of a simplified graph that joins several ways is drawn way by way (see
+moving walkways, lifts, platforms and the lines across areas, each kind a layer that
+the page switches on and off. A walkway tagged with several levels is drawn flat at
+the lowest; an edge without a level at its layer when that is below street level (a
+tunnel at least one below), else at street level. The view is true to scale: a level
+is drawn 4 m from the next above the ground floor and 6 m below it
+(:func:`pyrosm3d.styles.metres_of_levels`), over a flat ground at street level. An edge
+of a simplified graph that joins several ways is drawn way by way (see
 :func:`_edges_by_way`).
 
 With a terrain model the edges are drawn at heights in metres instead, those of
-:func:`pyrosm3d.heights.network_heights`, on a vertical axis in metres.
+:func:`pyrosm3d.heights.network_heights`.
 """
 
 import itertools
@@ -22,7 +21,6 @@ from collections import namedtuple
 
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 import shapely
 from geopandas import GeoDataFrame
 
@@ -36,8 +34,7 @@ from pyrosm3d.tags import (
     level_ranges,
     row_tags,
 )
-from pyrosm3d.styles import HEIGHT_STRETCH, levels_of_metres, metres_of_levels
-from pyrosm3d.touch import TouchFigure
+from pyrosm3d.styles import HEIGHT_STRETCH, metres_of_levels
 from pyrosm3d.view import View
 
 # (name in the legend, colour, line width, dash) of each kind of edge
@@ -369,25 +366,6 @@ def _edge_points(line, kind, level_u, level_v, origin, in_metres):
     return _line_points(line, z_u, z_v, origin, vertical=kind == "lift")
 
 
-class _Trace:
-    """The points of one legend entry, lines separated by gaps."""
-
-    def __init__(self):
-        self.x, self.y, self.z, self.text = [], [], [], []
-
-    def add(self, x, y, z, text, in_metres=False):
-        """Add one line through the points ``x``, ``y``, ``z`` (rounded to hundredths),
-        labelled ``text``, and with the height of each point when ``z`` is
-        ``in_metres``."""
-        self.x += np.round(x, 2).tolist() + [None]
-        self.y += np.round(y, 2).tolist() + [None]
-        self.z += np.round(z, 2).tolist() + [None]
-        if in_metres:
-            self.text += ["%s<br>%.1f m" % (text, height) for height in z] + [None]
-        else:
-            self.text += [text] * len(x) + [None]
-
-
 _Frames = namedtuple(
     "_Frames", ["edges", "nodes", "route", "metric", "crs", "middle", "on_route"]
 )
@@ -447,199 +425,6 @@ def _network_frames(edges, nodes, center, radius, route, areas, dem):
     return _Frames(edges, nodes, route, metric, crs, middle, on_route)
 
 
-def plot_network(
-    edges, nodes=None, center=None, radius=None, route=None, areas=None, dem=None
-):
-    """A plotly Figure of an indoor network in 3D (see the module docstring).
-
-    Parameters
-    ----------
-    edges : GeoDataFrame, igraph.Graph or networkx.MultiDiGraph
-        The edges of ``get_network(..., nodes=True, indoor_elements=True)``, or a graph
-        of ``get_graph(indoor_elements=True)`` (igraph or networkx). An edge of a
-        simplified graph that joins several ways is drawn way by way, each part with
-        the tags of its way.
-    nodes : GeoDataFrame (optional)
-        The nodes of the same read: their station entrances (``railway`` tagged
-        ``subway_entrance`` or ``train_station_entrance``) are markers that are hidden
-        until they are picked in the legend, and the ``route`` is drawn through them.
-        Taken from the graph when ``edges`` is one.
-    center : (lon, lat) or shapely Point (optional)
-        The middle of the view; by default the middle of the edges.
-    radius : float (optional)
-        Draw only the edges and areas that reach within this many metres (at least 0)
-        of ``center``, and the entrances within it; the ``route`` is drawn in full.
-    route : list of node ids (optional)
-        A path through the network, such as a shortest path of a networkx graph, drawn
-        as a wide red line along the edges between its nodes (``u`` and ``v``), also
-        beyond ``radius``, with markers at its two ends; a click on "Route" in the
-        legend hides it. Where several edges join two nodes, the route is drawn along
-        the shortest (by ``length`` where the edges have it, else by their lines); with
-        ``dem``, a step whose shortest edge has no heights is left out.
-    areas : GeoDataFrame (optional)
-        Polygons, such as platform areas or squares, drawn as outlines at their
-        ``level`` (street level without one); lines are drawn as they are. Areas have
-        no heights in metres, so they cannot be given with ``dem``.
-    dem : str or pathlib.Path, a sequence of them, or a function (optional)
-        A terrain model: a raster file of heights such as a GeoTIFF (reading one needs
-        ``pip install "pyrosm3d[dem]"``), several tiles of one, or a function
-        ``(longitudes, latitudes) -> heights``. The network is then drawn at heights in
-        metres (see :func:`pyrosm3d.heights.network_heights`): streets on the terrain,
-        floors placed from the streets that they meet, an entrance at the height of
-        an edge drawn on its level at its node, else on the ground. The hover texts
-        give the height
-        of each point, and an edge with a vertex where the terrain model has no
-        height is left out. The edges need the columns ``u`` and ``v``.
-
-    Returns
-    -------
-    plotly.graph_objects.Figure
-        Show it in a notebook with ``fig.show()``, in a browser window with
-        ``fig.show(renderer="browser")``, or save it with ``fig.write_html(path)``.
-        As HTML it has the controls for touch screens of
-        :class:`pyrosm3d.touch.TouchFigure`.
-    """
-    frames = _network_frames(edges, nodes, center, radius, route, areas, dem)
-    edges, nodes, route, in_metres = (
-        frames.edges,
-        frames.nodes,
-        frames.route,
-        dem is not None,
-    )
-    metric, crs, middle, on_route = (
-        frames.metric,
-        frames.crs,
-        frames.middle,
-        frames.on_route,
-    )
-    origin = (middle.x, middle.y)
-    traces = {kind: _Trace() for kind in _STYLES}
-    for row, edge_tags, kind, z_u, z_v in _edge_kinds(metric):
-        points = _edge_points(row.geometry, kind, z_u, z_v, origin, in_metres)
-        text = _edge_text(row, edge_tags, kind, z_u, z_v)
-        traces[kind].add(*points, text, in_metres)
-    ends = {
-        frozenset((row.u, row.v)): (
-            row.u,
-            _edge_points(row.geometry, kind, z_u, z_v, origin, in_metres),
-        )
-        for row, _, kind, z_u, z_v in _edge_kinds(on_route)
-    }
-    figure = TouchFigure()
-    if areas is not None:
-        _add_area_outlines(traces["area"], areas.to_crs(crs), middle, radius)
-    for kind, (name, colour, width, dash) in _STYLES.items():
-        if traces[kind].x:
-            figure.add_trace(_lines(traces[kind], name, colour, width, dash))
-    if route is not None:
-        _add_route(figure, route, ends, in_metres)
-    if nodes is not None:
-        entrances, levels = _entrances(nodes)
-        if in_metres:
-            heights = _entrance_heights(entrances, levels, edges, dem)
-        else:
-            heights = metres_of_levels(levels).tolist()
-        _add_entrances(
-            figure, entrances.to_crs(crs), heights, middle, radius, in_metres
-        )
-    figure.update_layout(
-        scene=_scene_to_scale(figure, in_metres),
-        legend=dict(itemclick="toggle"),
-        margin=dict(l=0, r=0, t=30, b=0),
-    )
-    return figure
-
-
-def _scene_to_scale(figure, in_metres):
-    """The scene of ``figure`` with its three axes at one scale: each axis ranges over
-    the drawn points and a margin (sideways 2 % of the wider horizontal span, at least
-    1 m; 1 m up and down), and the scene has the proportions of the ranges; a figure
-    without points keeps plotly's own ranges and proportions. The vertical axis is in
-    metres when the points are drawn ``in_metres``; else it names each whole level at
-    its height (see :func:`pyrosm3d.styles.metres_of_levels`)."""
-    vertical = dict(title="height (m)" if in_metres else "level")
-    scene = dict(xaxis=dict(title="east (m)"), yaxis=dict(title="north (m)"))
-    scene["zaxis"] = vertical
-    spans = []
-    for axis in "xyz":
-        drawn = [
-            value
-            for trace in figure.data
-            for value in getattr(trace, axis)
-            if value is not None
-        ]
-        if not drawn:
-            return scene
-        spans.append((min(drawn), max(drawn)))
-    sideways = max(0.02 * max(high - low for low, high in spans[:2]), 1.0)
-    margins = (sideways, sideways, 1.0)
-    ranges = [[low - by, high + by] for (low, high), by in zip(spans, margins)]
-    width = ranges[0][1] - ranges[0][0]
-    if not in_metres:
-        low, high = levels_of_metres(spans[2]).round(6)
-        levels = np.arange(math.ceil(low), math.floor(high) + 1)
-        vertical.update(
-            tickvals=metres_of_levels(levels).tolist(),
-            ticktext=["%d" % level for level in levels],
-        )
-    for axis, span in zip("xyz", ranges):
-        scene[axis + "axis"]["range"] = span
-    scene["aspectmode"] = "manual"
-    scene["aspectratio"] = {
-        axis: (high - low) / width for axis, (low, high) in zip("xyz", ranges)
-    }
-    return scene
-
-
-def _add_route(figure, route, ends, in_metres):
-    """Add the ``route`` (node ids) as a line along the edges between consecutive nodes,
-    either way (``ends``: ``{frozenset((u, v)): (u, (x, y, z))}``, the node an edge
-    starts at and its points as drawn, z ``in_metres`` or by levels), with markers at
-    its first and last point; steps without an edge are left out."""
-    line_trace = _Trace()
-    for a, b in zip(route[:-1], route[1:]):
-        if frozenset((a, b)) not in ends:
-            continue
-        start, points = ends[frozenset((a, b))]
-        if start != a:
-            points = [values[::-1] for values in points]
-        line_trace.add(*points, "route", in_metres)
-    if not line_trace.x:
-        return
-    figure.add_trace(_lines(line_trace, "Route", _ROUTE_COLOUR, 10.0, "solid"))
-    points = [i for i, x in enumerate(line_trace.x) if x is not None]
-    first, last = points[0], points[-1]
-    figure.add_trace(
-        go.Scatter3d(
-            x=[line_trace.x[first], line_trace.x[last]],
-            y=[line_trace.y[first], line_trace.y[last]],
-            z=[line_trace.z[first], line_trace.z[last]],
-            text=["route start", "route end"],
-            mode="markers",
-            name="Route ends",
-            legendgroup="Route",
-            showlegend=False,
-            marker=dict(size=7, symbol="circle", color=_ROUTE_COLOUR),
-            hovertemplate="%{text}<extra></extra>",
-        )
-    )
-
-
-def _lines(trace, name, colour, width, dash):
-    """A plotly line trace of the points of ``trace``, its own group in the legend."""
-    return go.Scatter3d(
-        x=trace.x,
-        y=trace.y,
-        z=trace.z,
-        text=trace.text,
-        mode="lines",
-        name=name,
-        legendgroup=name,
-        line=dict(color=colour, width=width, dash=dash),
-        hovertemplate="%{text}<extra></extra>",
-    )
-
-
 def _near(geometry, middle, radius):
     """Whether ``geometry`` reaches within ``radius`` metres of the point ``middle``
     (always without a radius)."""
@@ -666,13 +451,6 @@ def _area_lines(areas, middle, radius):
                 continue
             for line in lines:
                 yield _line_points(line, z, z, (middle.x, middle.y)), level
-
-
-def _add_area_outlines(trace, areas, middle, radius):
-    """Add the outlines of ``areas`` that reach within ``radius`` of ``middle`` to the
-    ``trace`` (see :func:`_area_lines`)."""
-    for points, level in _area_lines(areas, middle, radius):
-        trace.add(*points, "area, level %g" % level)
 
 
 def _entrances(nodes):
@@ -707,53 +485,56 @@ def _entrance_heights(entrances, levels, edges, dem):
     return [on_level.get(place, here) for place, here in zip(places, ground.tolist())]
 
 
-def _add_entrances(figure, entrances, heights, middle, radius, in_metres=False):
-    """Add the station ``entrances`` (in metres) within ``radius`` of ``middle`` as
-    markers at their ``heights``: those of their levels, or heights ``in_metres``,
-    which the hover text then gives (an entrance without a height is left out). The
-    markers are hidden until they are picked in the legend."""
-    x, y, z, text = [], [], [], []
-    for row, height in zip(entrances.itertuples(), heights):
-        point = row.geometry
-        if not _near(point, middle, radius) or np.isnan(height):
-            continue
-        x.append(point.x - middle.x)
-        y.append(point.y - middle.y)
-        z.append(height)
-        metres = "<br>%.1f m" % height if in_metres else ""
-        text.append("entrance %s%s" % (row.id, metres))
-    if x:
-        figure.add_trace(
-            go.Scatter3d(
-                x=x,
-                y=y,
-                z=z,
-                text=text,
-                mode="markers",
-                name="Station entrances",
-                visible="legendonly",
-                marker=dict(size=3.5, symbol="diamond", color="#1f2329"),
-                hovertemplate="%{text}<extra></extra>",
-            )
-        )
-
-
-def network_view(
+def plot_network(
     edges, nodes=None, center=None, radius=None, route=None, areas=None, dem=None
 ):
-    """A 3D view of an indoor network drawn with deck.gl (see :class:`pyrosm3d.View`):
-    the edges, the route, the station entrances and the areas that :func:`plot_network`
-    draws, taking the same arguments. Streets and the lines across areas lie white on a
-    flat grey ground at street level (no ground with a terrain model); a line under the
-    ground is paler in the see-through view; the lines across areas and the entrances
-    are off at the start. The view opens in the solid model over the route, else over
-    the center (with a radius) or the whole network, north up; "True heights" off draws
-    the heights taller. A tapped edge shows its name, element, levels and, in metres,
-    its heights.
+    """A 3D view of an indoor network (see the module docstring).
+
+    Parameters
+    ----------
+    edges : GeoDataFrame, igraph.Graph or networkx.MultiDiGraph
+        The edges of ``get_network(..., nodes=True, indoor_elements=True)``, or a graph
+        of ``get_graph(indoor_elements=True)`` (igraph or networkx). An edge of a
+        simplified graph that joins several ways is drawn way by way, each part with
+        the tags of its way.
+    nodes : GeoDataFrame (optional)
+        The nodes of the same read: their station entrances (``railway`` tagged
+        ``subway_entrance`` or ``train_station_entrance``) are points that are off
+        until they are switched on in the list of layers, and the ``route`` is drawn
+        through them. Taken from the graph when ``edges`` is one.
+    center : (lon, lat) or shapely Point (optional)
+        The middle of the view; by default the middle of the edges.
+    radius : float (optional)
+        Draw only the edges and areas that reach within this many metres (at least 0)
+        of ``center``, and the entrances within it; the ``route`` is drawn in full.
+    route : list of node ids (optional)
+        A path through the network, such as a shortest path of a networkx graph, drawn
+        as a wide red line along the edges between its nodes (``u`` and ``v``), also
+        beyond ``radius``, over what is in front of it, with points at its two ends.
+        Where several edges join two nodes, the route is drawn along the shortest (by
+        ``length`` where the edges have it, else by their lines); with ``dem``, a step
+        whose shortest edge has no heights is left out. The view starts over the
+        route.
+    areas : GeoDataFrame (optional)
+        Polygons, such as platform areas or squares, drawn as outlines at their
+        ``level`` (street level without one); lines are drawn as they are. Areas have
+        no heights in metres, so they cannot be given with ``dem``.
+    dem : str or pathlib.Path, a sequence of them, or a function (optional)
+        A terrain model: a raster file of heights such as a GeoTIFF (reading one needs
+        ``pip install "pyrosm3d[dem]"``), several tiles of one, or a function
+        ``(longitudes, latitudes) -> heights``. The network is then drawn at heights in
+        metres (see :func:`pyrosm3d.heights.network_heights`): streets on the terrain,
+        floors placed from the streets that they meet, an entrance at the height of
+        an edge drawn on its level at its node, else on the ground. A tapped edge
+        shows its heights, and an edge with a vertex where the terrain model has no
+        height is left out. The edges need the columns ``u`` and ``v``.
 
     Returns
     -------
     pyrosm3d.View
+        In a notebook the view is the output of the cell; ``view.to_html(path)`` writes
+        it as a page and ``view.show()`` shows it. It opens in the solid model, also
+        seen through as a map; "True heights" off draws the heights taller.
     """
     frames = _network_frames(edges, nodes, center, radius, route, areas, dem)
     edges, nodes, route, in_metres = (

@@ -40,6 +40,8 @@ The data of a view is a dict that the page script reads:
 import html
 import json
 import re
+import tempfile
+import webbrowser
 from importlib import resources
 from pathlib import Path
 
@@ -75,7 +77,7 @@ class View:
     """A 3D view: a web page that draws its data with deck.gl.
 
     In a notebook the view is the output of a cell, in a frame of its own;
-    :meth:`to_html` writes it as a page of its own.
+    :meth:`to_html` writes it as a page of its own, and :meth:`show` shows it.
 
     Parameters
     ----------
@@ -136,3 +138,29 @@ class View:
             'allow="fullscreen"></iframe>'
             % (html.escape(self.to_html(), quote=True), _FRAME_HEIGHT)
         )
+
+    def show(self):
+        """Show the view: as the output of the cell in a notebook, else as a page in
+        the web browser, written to a temporary file.
+
+        Returns
+        -------
+        pathlib.Path or None
+            The file written, outside a notebook.
+        """
+        try:
+            from IPython import get_ipython
+            from IPython.display import display
+        except ImportError:
+            shell = None
+        else:
+            shell = get_ipython()
+        if getattr(shell, "kernel", None) is not None:
+            display(self)
+            return None
+        handle, name = tempfile.mkstemp(prefix="pyrosm3d-", suffix=".html")
+        with open(handle, "w", encoding="utf-8") as page:
+            page.write(self.to_html())
+        path = Path(name)
+        webbrowser.open(path.as_uri())
+        return path
