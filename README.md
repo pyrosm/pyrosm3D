@@ -44,6 +44,7 @@ dem = "elevation.tif"                          # a raster of ground heights that
 
 nodes, edges = osm.in3d.get_network(dem=dem)   # the edges with u_height and v_height
 osm.in3d.plot_network(dem=dem).show()          # the network drawn in metres
+osm.in3d.plot_indoor(dem=dem).show()           # the indoor view in metres
 ```
 
 `dem` takes a raster file such as a GeoTIFF, a list of tiles, or a function `(longitudes, latitudes) -> heights`. pyrosm3d bundles and downloads no terrain data. Reading a raster file needs rasterio, which the `dem` extra installs:
