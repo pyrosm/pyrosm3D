@@ -45,7 +45,8 @@ from pyrosm3d.styles import (
     VIEW_MARGIN,
     WALL_HEIGHT,
     WALL_NAME,
-    WALL_STYLE,
+    WALL_COLOUR,
+    WALL_OPACITY,
     metres_of_levels,
 )
 from pyrosm3d.tags import element_keys, row_tags
@@ -55,8 +56,8 @@ from pyrosm3d.walls import building_outlines, inner_walls, outer_walls
 # Metres that a wall is thick
 _WALL_THICKNESS = 0.12
 # How opaque (0 to 255) each face of a wall is: a look through a wall passes two faces
-# of its block, which together tint as much as one panel of WALL_STYLE's opacity
-_WALL_ALPHA = round(255 * (1 - (1 - WALL_STYLE["opacity"]) ** 0.5))
+# of its block, which together tint as much as one panel of WALL_OPACITY
+_WALL_ALPHA = round(255 * (1 - (1 - WALL_OPACITY) ** 0.5))
 _COLUMN_ALPHA = 77
 # Metres under the height of its level that a floor lies, so that the lines of the
 # network stay on it, and that the floor of a whole level lies under that
@@ -336,7 +337,7 @@ def _point_group(points, style, lift, between, heights, origin):
     """The ``points`` of a doors or pois layer as a group of points ``lift`` metres
     over their floor on each of their whole levels and of the levels ``between``, off
     at the start; ``style`` is ``DOOR_STYLE`` or ``POI_STYLE``."""
-    name, colour, _, fallback = style
+    name, colour, fallback = style
     items = []
     columns = (points["levels"], points["tags"], points.geometry)
     for key, levels, tags, point in zip(element_keys(points), *columns):
@@ -423,7 +424,7 @@ def indoor_groups(view, origin, heights=level_heights):
         group = dict(
             name=name,
             kind="glass",
-            colour=WALL_STYLE["color"],
+            colour=WALL_COLOUR,
             alpha=_WALL_ALPHA,
             visible=visible,
             items=items,
@@ -648,7 +649,7 @@ def element_notes(indoor):
         notes[key] = "%s · %s" % (name, levels_text(levels))
     for layer, style in ((indoor.doors, DOOR_STYLE), (indoor.pois, POI_STYLE)):
         for key, levels in zip(element_keys(layer), layer["levels"]):
-            notes[key] = "%s · %s" % (style[3], levels_text(levels))
+            notes[key] = "%s · %s" % (style[2], levels_text(levels))
     return notes
 
 

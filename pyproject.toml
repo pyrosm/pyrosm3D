@@ -11,7 +11,7 @@ license = "BSD-3-Clause"
 license-files = ["LICENSE"]
 authors = [{ name = "Henrikki Tenkanen" }]
 requires-python = ">=3.11"
-keywords = ["OpenStreetMap", "pyrosm", "indoor", "3D", "plotly", "GeoDataFrame"]
+keywords = ["OpenStreetMap", "pyrosm", "indoor", "3D", "deck.gl", "GeoDataFrame"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -29,7 +29,6 @@ dependencies = [
     "geopandas>=0.12.0",
     "numpy",
     "pandas",
-    "plotly>=5.15",
     "shapely>=2.1",
 ]
 
@@ -45,8 +44,6 @@ include = ["pyrosm3d*"]
 
 [tool.setuptools.package-data]
 pyrosm3d = [
-    "figure.js",
-    "touch.js",
     "view.html",
     "view_camera.js",
     "view_layers.js",

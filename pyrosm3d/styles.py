@@ -23,7 +23,7 @@ LANDING = 1.0
 DOOR_GAP = 0.9
 DOOR_REACH = 0.25
 
-# (name in the legend, colour of the floor, name in the hover text) of each kind of
+# (name in the list of layers, colour of the floor, name in the text) of each kind of
 # area that has a floor, in drawing order
 AREA_STYLES = {
     "room": ("Rooms", "#e3dccd", "room"),
@@ -37,17 +37,12 @@ AREA_STYLES = {
 }
 OUTLINE_COLOUR = "#8a8f98"
 LEVEL_OUTLINE_COLOUR = "#b9a99c"
-# Walls are see-through panels, lit from one side so that their faces differ
+# Walls are see-through: their colour, and how much a wall hides of what is behind it
 WALL_NAME = "Walls (rooms and indoor=wall)"
 OUTER_WALL_NAME = "Outer walls (level or building outlines)"
-WALL_STYLE = dict(
-    color="#8cc4ec",
-    opacity=0.32,
-    flatshading=True,
-    lighting=dict(ambient=0.55, diffuse=0.7, specular=0.05, roughness=0.9, fresnel=0),
-    lightposition=dict(x=1000, y=-2000, z=3000),
-)
-# (name in the legend, colour, name in the hover text) of the columns of each kind of
+WALL_COLOUR = "#8cc4ec"
+WALL_OPACITY = 0.32
+# (name in the list of layers, colour, name in the text) of the columns of each kind of
 # shaft
 COLUMN_STYLES = {
     "stairs": ("Stairwells (room=stairs)", "#e07b5f", "stairwell"),
@@ -59,24 +54,11 @@ COLUMN_STYLES = {
 }
 # The floor of a level or building outline, drawn under its outer walls
 LEVEL_FLOOR_COLOUR = "#ebe9e4"
-# Where the view starts: seen from the south-east and above, so that north lies away
-# from the viewer, with the middle of the scene a little below the middle of the view
-CAMERA = dict(eye=dict(x=1.25, y=-1.35, z=0.95), center=dict(x=0, y=0, z=-0.08))
-# The axes of the scene: no panes behind the drawing, and quiet lines and text
-AXIS_STYLE = dict(
-    showbackground=False,
-    gridcolor="#d6dbe1",
-    zerolinecolor="#d6dbe1",
-    color="#5c6672",
-    title_font_size=11,
-    tickfont_size=10,
-)
+# The background of the indoor view
 BACKGROUND_COLOUR = "#ffffff"
-# The label of the element under the pointer
-HOVER_LABEL = dict(bgcolor="#ffffff", bordercolor="#d6dbe1", font_color="#1c2229")
-# (name in the legend, colour, marker symbol, name in the hover text) of the markers
-DOOR_STYLE = ("Doors and entrances", "#31363b", "square", "door or entrance")
-POI_STYLE = ("Shops and amenities", "#a07a00", "circle", "shop or amenity")
+# (name in the list of layers, colour, name in the text) of the doors and the shops
+DOOR_STYLE = ("Doors and entrances", "#31363b", "door or entrance")
+POI_STYLE = ("Shops and amenities", "#a07a00", "shop or amenity")
 
 
 def metres_of_levels(levels):

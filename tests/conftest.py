@@ -78,33 +78,6 @@ def maunula(maunula_frames):
 
 
 @pytest.fixture(scope="session")
-def run_scripts():
-    """A function that runs the scripts of an HTML file written by pyrosm3d in node,
-    with ``page_harness.js``, and returns the JSON that the harness prints.
-
-    For the page at ``path`` on a page of the ``size`` ("wide" or "small"): what it
-    shows when its legend button and each of its level buttons are pressed, the legend
-    ``entry`` is switched off, the first point of the trace ``clicked`` is clicked,
-    the tags panel is closed and two fingers move on the view. For a figure written
-    outside a page: what its scripts set, and the same two fingers."""
-
-    def run(path, entry="-", clicked="-", size="wide"):
-        node = shutil.which("node")
-        if node is None:
-            if os.environ.get("CI"):
-                pytest.fail("the scripts are tested with node, which is not installed")
-            pytest.skip("node is not installed")
-        harness = Path(__file__).parent / "page_harness.js"
-        command = [node, str(harness), str(path), entry, clicked, size]
-        done = subprocess.run(
-            command, capture_output=True, encoding="utf-8", check=True
-        )
-        return json.loads(done.stdout)
-
-    return run
-
-
-@pytest.fixture(scope="session")
 def run_view():
     """A function that runs the scripts of the page of a ``pyrosm3d.View`` in node,
     with ``view_harness.js`` and stand-ins for deck.gl, and returns what the page

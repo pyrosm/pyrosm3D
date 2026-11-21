@@ -1,9 +1,9 @@
 import numpy as np
 import pytest
 from geopandas import GeoDataFrame
-from shapely.geometry import LineString, Polygon
+from shapely.geometry import LineString
 
-from pyrosm3d.floors import floor_levels, floor_openings, triangles
+from pyrosm3d.floors import floor_levels, floor_openings
 
 
 @pytest.mark.parametrize(
@@ -58,19 +58,3 @@ def test_floor_openings():
     assert openings[2.0].area == pytest.approx(11 * 2.0)
     assert floor_openings(edges[["geometry"]]) == {}
 
-
-def test_triangles_cover_a_polygon_with_a_hole():
-    """The triangles of a 4 m square with a 1 m hole cover its 15 square metres and
-    leave the hole open."""
-    hole = [(1, 1), (2, 1), (2, 2), (1, 2)]
-    square = Polygon([(0, 0), (4, 0), (4, 4), (0, 4)], [hole])
-    corners = triangles(square)
-    assert corners.shape[1:] == (3, 2)
-    a, b, c = corners[:, 0], corners[:, 1], corners[:, 2]
-    doubled = (b[:, 0] - a[:, 0]) * (c[:, 1] - a[:, 1]) - (c[:, 0] - a[:, 0]) * (
-        b[:, 1] - a[:, 1]
-    )
-    assert np.abs(doubled).sum() / 2 == pytest.approx(15.0)
-    middles = corners.mean(axis=1)
-    in_hole = (middles > 1).all(axis=1) & (middles < 2).all(axis=1)
-    assert not in_hole.any()

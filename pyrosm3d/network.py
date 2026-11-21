@@ -37,7 +37,8 @@ from pyrosm3d.tags import (
 from pyrosm3d.styles import HEIGHT_STRETCH, metres_of_levels
 from pyrosm3d.view import View
 
-# (name in the legend, colour, line width, dash) of each kind of edge
+# (name in the list of layers, colour, line width in pixels in the indoor view, dash)
+# of each kind of edge
 _STYLES = {
     "street": ("Walkways at street level", "#c3c7ce", 1.5, "solid"),
     "levels": ("Walkways on other levels", "#3987e5", 3.5, "solid"),
@@ -307,10 +308,10 @@ def _edge_kinds(edges):
         yield row, edge_tags, kind, z_u, z_v
 
 
-def _edge_text(row, tags, kind, level_u, level_v, newline="<br>"):
+def _edge_text(row, tags, kind, level_u, level_v):
     """The text of an edge: its name (else the name of its ``kind``), its element with
-    its ``highway`` value (else its ``kind``), and the levels that it is drawn at, on
-    lines joined by ``newline``."""
+    its ``highway`` value (else its ``kind``), and the levels that it is drawn at, each
+    on a line of its own."""
     element, ids = getattr(row, "osm_type", "way"), getattr(row, "id", "")
     if isinstance(ids, list):  # an edge that joins several ways and is kept whole
         element, ids = element + "s", ", ".join(dict.fromkeys(map(str, ids)))
@@ -319,7 +320,7 @@ def _edge_text(row, tags, kind, level_u, level_v, newline="<br>"):
         "%s %s · %s" % (element, ids, tags.get("highway", kind)),
         end_levels_text(level_u, level_v),
     )
-    return newline.join(parts)
+    return "\n".join(parts)
 
 
 def end_levels_text(level_u, level_v):
@@ -641,7 +642,7 @@ class _NetworkLines:
         if isinstance(ids, list) or is_missing(ids) or ids == "":
             # an edge that joins several ways (kept whole) or has no id: its own text
             if isinstance(ids, list):
-                text = _edge_text(row, tags, kind, level_u, level_v, newline="\n")
+                text = _edge_text(row, tags, kind, level_u, level_v)
             else:
                 text = "\n".join((name, highway, end_levels_text(level_u, level_v)))
             item = {"p": points.tolist(), "t": text}
