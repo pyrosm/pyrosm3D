@@ -50,7 +50,7 @@ from pyrosm3d.styles import (
     metres_of_levels,
 )
 from pyrosm3d.tags import element_keys, row_tags
-from pyrosm3d.view import DECK_GL, View
+from pyrosm3d.view import DECK_GL, View, polygon_parts, polygon_rings
 from pyrosm3d.walls import building_outlines, inner_walls, outer_walls
 
 # Metres that a wall is thick
@@ -191,27 +191,6 @@ def indoor_stretch(box, low, high):
     return share * longest / tall
 
 
-def _polygons(shape):
-    """The polygons of ``shape`` as a MultiPolygon, empty when it has none."""
-    parts = shapely.get_parts(shape)
-    return shapely.MultiPolygon(
-        [part for part in parts if part.geom_type == "Polygon" and not part.is_empty]
-    )
-
-
-def _rings(shape, z, origin):
-    """The rings of each polygon of ``shape`` (in metres) as lists of ``[x, y, z]``
-    points in metres from ``origin``, at the height ``z``."""
-    found = []
-    for polygon in shapely.get_parts(shape):
-        rings = []
-        for ring in (polygon.exterior, *polygon.interiors):
-            xy = shapely.get_coordinates(ring) - origin
-            rings.append(np.column_stack([xy, np.full(len(xy), z)]).round(2).tolist())
-        found.append(rings)
-    return found
-
-
 def _floor_groups(view, heights, origin):
     """The floors of the areas of ``view`` (an IndoorBox), a group for each kind of
     ``AREA_STYLES``, in their order: on each level of
@@ -225,19 +204,19 @@ def _floor_groups(view, heights, origin):
     for key, kind, levels, tags, area in zip(element_keys(areas), *columns):
         if kind not in AREA_STYLES:
             continue
-        polygon = _polygons(_inside(area, view.shape))
+        polygon = polygon_parts(_inside(area, view.shape))
         spot = polygon.representative_point()
         for level in floor_levels(kind, levels):
             floor = polygon
             if level in openings and polygon.intersects(openings[level]):
-                floor = _polygons(polygon.difference(openings[level]))
+                floor = polygon_parts(polygon.difference(openings[level]))
             name = tags.get("name") or tags.get("ref")
             what = (name, AREA_STYLES[kind][2], "%s · level %g" % (key, level))
             text = "\n".join(filter(None, what))
             z = heights(spot.x, spot.y, level) - _FLOOR_DROP
             items[kind] += [
                 {"r": rings, "k": kind, "t": text, "l": float(level), "q": key}
-                for rings in _rings(floor, z, origin)
+                for rings in polygon_rings(floor, z, origin)
             ]
     return [
         dict(
@@ -293,7 +272,7 @@ def _level_floor_items(floors, heights, origin):
             text = "Floor of level %g" % level
             items += [
                 {"r": rings, "k": "level", "t": text, "l": float(level)}
-                for rings in _rings(polygon, z, origin)
+                for rings in polygon_rings(polygon, z, origin)
             ]
     return items
 
@@ -317,7 +296,7 @@ def _column_groups(indoor, heights, origin):
             )
             items += [
                 {"r": rings, "h": round(high - low, 2), "t": text, "q": key}
-                for rings in _rings(outline, low, origin)
+                for rings in polygon_rings(outline, low, origin)
             ]
         groups.append(
             dict(

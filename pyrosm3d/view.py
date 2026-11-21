@@ -7,6 +7,8 @@ The data of a view is a dict that the page script reads:
     page's list of layers, one name for each group), a ``kind``, a ``colour``
     (``"#rrggbb"``), whether it is ``visible`` at the start, and the style of its kind.
     The kinds: ``ground`` (a ``grid`` of heights, or ``items`` with rings ``r``),
+    ``buildings`` (blocks: rings ``r`` at the bottom, a height ``h``, the height of
+    the ground ``g`` for the footprint, ``part`` for the part of a building),
     ``floors`` (rings ``r`` of a kind ``k`` among the group's ``colours``),
     ``outlines`` and ``lines`` (paths ``p``), ``glass`` (see-through blocks: rings
     ``r`` and a height ``h``) and ``points`` (a place ``c``). Points are ``[x, y, z]``
@@ -49,6 +51,9 @@ import webbrowser
 from importlib import resources
 from pathlib import Path
 
+import numpy as np
+import shapely
+
 # The deck.gl library that the pages load
 DECK_GL = "https://cdn.jsdelivr.net/npm/deck.gl@8.9.35/dist.min.js"
 # The scripts of a page, in the order they run
@@ -67,6 +72,33 @@ def _script_json(data):
     that could end the element or start markup are written as escapes."""
     text = json.dumps(data, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
     return text.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+
+
+def polygon_parts(shape):
+    """The polygons of ``shape``, a geometry or a list of them, also inside
+    collections, as a MultiPolygon: empty where there are none (no shape, a point, a
+    line, or a polygon that has collapsed)."""
+    parts = shapely.get_parts(shape)
+    while np.isin(shapely.get_type_id(parts), [4, 5, 6, 7]).any():  # multi, collection
+        parts = shapely.get_parts(parts)
+    return shapely.MultiPolygon(
+        [part for part in parts if part.geom_type == "Polygon" and part.area > 0]
+    )
+
+
+def polygon_rings(shape, z, origin, decimals=2):
+    """The rings of each polygon of ``shape`` (in metres) as items of a view take
+    them: for each polygon a list of rings, each a list of ``[x, y, z]`` points in
+    metres from ``origin`` at the height ``z``, rounded to ``decimals``."""
+    found = []
+    for polygon in shapely.get_parts(shape):
+        rings = []
+        for ring in (polygon.exterior, *polygon.interiors):
+            xy = shapely.get_coordinates(ring) - origin
+            points = np.column_stack([xy, np.full(len(xy), z)])
+            rings.append(points.round(decimals).tolist())
+        found.append(rings)
+    return found
 
 
 def _check_names(data):

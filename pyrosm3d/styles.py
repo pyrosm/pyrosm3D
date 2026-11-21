@@ -8,6 +8,9 @@ FLOOR_HEIGHT = 4.0
 UNDERGROUND_FLOOR_HEIGHT = 6.0
 # Walls are cut away at this height, so that the rooms stay visible from above
 WALL_HEIGHT = 0.4 * FLOOR_HEIGHT
+# Metres that the ground is drawn under street level or the terrain, so that what lies
+# on it stays on top
+GROUND_DROP = 0.4
 # Metres drawn around the indoor areas
 VIEW_MARGIN = 10.0
 # How much taller than to scale the views draw heights when they are not drawn to scale,

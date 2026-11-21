@@ -34,7 +34,7 @@ from pyrosm3d.tags import (
     level_ranges,
     row_tags,
 )
-from pyrosm3d.styles import HEIGHT_STRETCH, metres_of_levels
+from pyrosm3d.styles import GROUND_DROP, HEIGHT_STRETCH, metres_of_levels
 from pyrosm3d.view import View
 
 # (name in the list of layers, colour, line width in pixels in the indoor view, dash)
@@ -90,10 +90,9 @@ _OFF_AT_START = ("crossing",)
 # and keeps this share of its opacity in the see-through view
 _BELOW_GROUND = -1.5
 _BELOW_SHARE = 0.6
-# The ground: a grey surface this far under street level, as far as the network and
+# The ground: a grey surface GROUND_DROP under street level, as far as the network and
 # this many metres around it
 _GROUND_COLOUR = "#dde1e6"
-_GROUND_DROP = 0.4
 _GROUND_MARGIN = 20.0
 
 
@@ -772,7 +771,7 @@ def _ground_at_middle(crs, origin, dem):
 
 
 def _flat_ground(paths):
-    """The ground of a view without a terrain model: one square at ``_GROUND_DROP``
+    """The ground of a view without a terrain model: one square at ``GROUND_DROP``
     under street level around the points of ``paths``, ``_GROUND_MARGIN`` beyond them;
     the walker stands on street level (``t``)."""
     xy = np.array([point[:2] for path in paths for point in path])
@@ -784,7 +783,7 @@ def _flat_ground(paths):
         step=round(side, 1),
         rows=2,
         columns=2,
-        z=[-_GROUND_DROP] * 4,
+        z=[-GROUND_DROP] * 4,
         t=[0.0] * 4,
     )
     return dict(
