@@ -7,6 +7,7 @@ from pyrosm3d.figure import plot_indoor
 from pyrosm3d.heights import network_heights
 from pyrosm3d.network import plot_network
 from pyrosm3d.page import to_html
+from pyrosm3d.view import View
 
 try:
     __version__ = version("pyrosm3d")
@@ -19,4 +20,5 @@ __all__ = [
     "plot_indoor",
     "plot_network",
     "to_html",
+    "View",
 ]

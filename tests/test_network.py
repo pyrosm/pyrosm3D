@@ -1,182 +1,16 @@
 import numpy as np
 import pandas as pd
 import pytest
-from shapely.geometry import LineString, Point
+from shapely.geometry import LineString
 
-from pyrosm3d import network_heights, plot_network
-from pyrosm3d.dem import sample_dem
+from pyrosm3d import plot_network
 from pyrosm3d.network import (
-    _STYLES,
     _edge_kind,
     _edge_text,
     _edges_by_way,
     _graph_frames,
 )
-
-
-def _traces(figure):
-    """``{legend name: trace}`` of a figure."""
-    return {trace.name: trace for trace in figure.data}
-
-
-def test_plot_network_draws_an_indoor_network(helsinki_indoor):
-    """Each kind of edge is a legend entry; the lift of node 2039713549 is a vertical
-    line from level -2, 12 m below the ground floor, to level 0; the vertical axis
-    names the levels at their heights, 6 m apart below the ground floor and 4 m above
-    it, down to level -4, and the scene has the proportions of its axes' ranges, the
-    vertical one 1 m beyond the drawn points; a radius keeps what reaches near the
-    center; the route is
-    a line, drawn over the edges with markers at its ends, that rises through the lift
-    (a step that is not an edge left out, no route without the u and v columns;
-    repeated index labels are fine; the same route for edges in another coordinate
-    system); polygon and line areas are outlines at the level
-    of their JSON tags (the point at the center left out), and entrances markers
-    that are hidden until they are picked in the legend, unlike the other kinds;
-    stairs, escalators, moving walkways, lifts and platforms each have a colour of
-    their own."""
-    osm, nodes, edges = helsinki_indoor
-    areas = osm.get_data_by_custom_criteria({"railway": ["platform"]}, keep_nodes=False)
-    near = dict(center=(24.9415, 60.1712), radius=200)
-    point = areas.iloc[:1].assign(geometry=[Point(near["center"])])
-    areas = pd.concat([areas, point])
-    route = [2039713539, 2039713549, -2039713549001, 2039713561, 1]
-    figure = plot_network(edges, nodes, route=route, areas=areas, **near)
-    traces = _traces(figure)
-    assert {"Escalators", "Stairs", "Lifts", "Platforms", "Route"} <= set(traces)
-    assert {"Area outlines", "Station entrances", "Lines across areas"} <= set(traces)
-    assert traces["Station entrances"].visible == "legendonly"
-    assert traces["Lifts"].visible is None
-    lift = traces["Lifts"]
-    assert [lift.z[i] for i in range(3)] == [-12.0, 0.0, None]
-    scene = figure.layout.scene
-    levels = [int(text) for text in scene.zaxis.ticktext]
-    assert scene.zaxis.title.text == "level" and levels == [-4, -3, -2, -1, 0]
-    assert list(scene.zaxis.tickvals) == [
-        6 * level if level < 0 else 4 * level for level in levels
-    ]
-    spans = [axis.range[1] - axis.range[0] for axis in (scene.xaxis, scene.zaxis)]
-    assert scene.aspectratio.x == 1
-    assert scene.aspectratio.z == pytest.approx(spans[1] / spans[0])
-    assert list(scene.zaxis.range) == [-25, 1]
-    route_z = pd.Series(traces["Route"].z)
-    steps = [
-        list(part.dropna()) for _, part in route_z.groupby(route_z.isna().cumsum())
-    ]
-    assert [-12.0, 0.0] in steps
-    line, ends = traces["Route"], traces["Route ends"]
-    points = [p for p in zip(line.x, line.y, line.z) if p[0] is not None]
-    assert list(zip(ends.x, ends.y, ends.z)) == [points[0], points[-1]]
-    assert ends.legendgroup == line.legendgroup and ends.showlegend is False
-    moved = _traces(plot_network(edges.to_crs(3067), route=route, **near))["Route"]
-    assert list(moved.z) == list(line.z)
-    assert line.line.color == ends.marker.color == "#e8002d"
-    assert line.line.dash == "solid" and line.line.width == 10
-    assert traces["Platforms"].line.color == "#199e70"
-    assert traces["Stairs"].line.color == "#444b55"
-    assert traces["Escalators"].line.color == "#c98500"
-    kinds = ("stairs", "escalator", "moving_walkway", "lift", "platform")
-    assert len({_STYLES[kind][1] for kind in kinds}) == len(kinds)
-    names = [trace.name for trace in figure.data]
-    assert names.index("Route") > names.index("Platforms")
-    area = traces["Area outlines"]
-    assert min(z for z in area.z if z is not None) < 0
-    assert (0, 0) not in set(zip(area.x, area.y))
-    repeated = pd.concat([edges, edges.iloc[:1]]).drop(columns=["u", "v"])
-    everything = plot_network(repeated, nodes, route=route)
-    assert "Route" not in _traces(everything)
-    walkways = _traces(everything)["Walkways at street level"]
-    assert len(walkways.x) > len(traces["Walkways at street level"].x)
-    xy = np.array([(x, y) for x, y in zip(walkways.x, walkways.y) if x is not None])
-    assert abs(xy).max() > 200
-
-
-def test_plot_network_draws_heights_in_metres(helsinki_centre, helsinki_dem):
-    """With a terrain model the centre of Helsinki is drawn at the heights of
-    network_heights, on an axis in metres: a lift from level -2 to the ground floor
-    is a vertical line between the heights of its two ends, 12 m apart, which the
-    hover texts give; the route runs down it; the
-    entrance of node 249350774 is at the network's height on its level (12.7 m, the
-    ground is at 15 m) and that of node 2261292460, which the network meets on another
-    level only, on the ground. Where the terrain model has no heights, edges and
-    entrances are left out."""
-    nodes, edges = helsinki_centre
-    found = network_heights(edges, helsinki_dem).set_index("id")
-    lift, entrance, on_ground = 2039713549, 249350774, 2261292460
-    figure = plot_network(edges, nodes, route=[-lift * 1000 - 1, lift], dem=helsinki_dem)
-    scene = figure.layout.scene
-    assert scene.zaxis.title.text == "height (m)" and scene.zaxis.tickvals is None
-    spans = [axis.range[1] - axis.range[0] for axis in (scene.xaxis, scene.zaxis)]
-    assert scene.aspectratio.z == pytest.approx(spans[1] / spans[0])
-    traces = _traces(figure)
-    ends = found.loc[lift, ["u_height", "v_height"]].round(2).tolist()
-    assert ends == [-7.89, 4.09]
-    lifts = traces["Lifts"]
-    assert list(lifts.z[:3]) == ends + [None] and lifts.x[0] == lifts.x[1]
-    assert lifts.text[0].endswith("levels -2 → 0<br>-7.9 m")
-    assert list(traces["Route"].z) == ends[::-1] + [None]
-    assert traces["Route"].text[1] == "route<br>-7.9 m"
-
-    heights = dict(zip(traces["Station entrances"].text, traces["Station entrances"].z))
-    end = found[(found["u"] == entrance) & (found["u_level"] == 0)]["u_height"].iloc[0]
-    assert heights["entrance %d<br>12.7 m" % entrance] == end
-    place = nodes[nodes["id"] == on_ground].geometry.iloc[0]
-    ground = sample_dem([place.x], [place.y], helsinki_dem)[0]
-    assert heights["entrance %d<br>4.0 m" % on_ground] == ground == 4.0
-
-    def west_only(longitudes, latitudes):
-        heights = sample_dem(longitudes, latitudes, helsinki_dem)
-        return np.where(longitudes > 24.937, np.nan, heights)
-
-    west = _traces(plot_network(edges, nodes, dem=west_only))
-    assert 0 < len(west["Station entrances"].x) < len(heights)
-    streets = "Walkways at street level"
-    assert 0 < len(west[streets].x) < len(traces[streets].x)
-    assert not any(z != z for z in west[streets].z if z is not None)
-
-
-def test_plot_network_draws_a_tunnel_with_an_entrance():
-    """An entrance on level -1 in the middle of a tunnel between two streets at 10 m
-    and 14 m, under a hill of 100 m: the tunnel has no level columns and is drawn on
-    level -1, so the entrance is at the tunnel's height there, 12 m, not on the hill.
-    By levels, the tunnel alone and its entrance lie 6 m below the ground floor, the
-    vertical axis names level -1 there and reaches 1 m up and down; a view that no
-    edge reaches has no points and plotly's own proportions."""
-    from geopandas import GeoDataFrame
-
-    def line(west, east):
-        return LineString([(24.94 + west * 1e-3, 60.17), (24.94 + east * 1e-3, 60.17)])
-
-    edges = GeoDataFrame(
-        {
-            "u": [1, 2, 3, 4],
-            "v": [2, 3, 4, 5],
-            "tags": [None, '{"tunnel":"yes"}', '{"tunnel":"yes"}', None],
-        },
-        geometry=[line(-1, 0), line(0, 1), line(1, 2), line(2, 3)],
-        crs=4326,
-    )
-    nodes = GeoDataFrame(
-        {"id": [3], "railway": ["subway_entrance"], "level": ["-1"]},
-        geometry=[Point(24.941, 60.17)],
-        crs=4326,
-    )
-
-    def hill(longitudes, latitudes):
-        east = (longitudes - 24.94) * 1e3
-        return np.where(east < 0.5, 10.0, np.where(east < 1.5, 100.0, 14.0))
-
-    entrances = _traces(plot_network(edges, nodes, dem=hill))["Station entrances"]
-    assert list(entrances.z) == pytest.approx([12.0], abs=0.01)
-    assert list(entrances.text) == ["entrance 3<br>12.0 m"]
-
-    by_levels = plot_network(edges.iloc[1:3], nodes)
-    vertical = by_levels.layout.scene.zaxis
-    assert list(vertical.ticktext) == ["-1"] and list(vertical.tickvals) == [-6]
-    assert list(vertical.range) == [-7, -5]
-    assert list(_traces(by_levels)["Station entrances"].z) == [-6]
-    nothing = plot_network(edges, center=(25.0, 60.17), radius=10)
-    assert not nothing.data and nothing.layout.scene.zaxis.title.text == "level"
-    assert nothing.layout.scene.aspectratio.x is None
+from test_network_view import _groups, _heights, _texts
 
 
 @pytest.mark.parametrize("graph_type", ["networkx", "igraph"])
@@ -202,26 +36,25 @@ def test_plot_network_draws_graphs(helsinki_indoor, graph_type):
     )
     tunnel_edge = (1514631272, 173248856)
     route = [*tunnel_edge, 1369465828, 1369465823]
-    figure = plot_network(graph, center=(24.9415, 60.1712), radius=200, route=route)
-    traces = _traces(figure)
-    assert {"Escalators", "Lifts", "Platforms", "Station entrances"} <= set(traces)
+    view = plot_network(graph, center=(24.9415, 60.1712), radius=200, route=route)
+    groups = _groups(view)
+    assert {"Escalators", "Lifts", "Platforms", "Station entrances"} <= set(groups)
     n_edges = graph.ecount() if graph_type == "igraph" else graph.number_of_edges()
     merged = _graph_frames(graph)[0]
     assert len(merged) * 2 == n_edges
-    assert list(traces["Route"].z)[:7] == [0, 0, None, -6, -6, -6, None]
-    drawn = np.array(
-        [traces["Route"].x[7:-1], traces["Route"].y[7:-1]], dtype=float
-    )
-    assert np.hypot(*np.diff(drawn)).sum() == pytest.approx(40.1, abs=0.5)
+    runs = _heights(view, "Route")
+    assert runs[:2] == [[0, 0], [-6, -6, -6]]
+    shorter = np.array(groups["Route"]["items"][2]["p"])[:, :2]
+    assert np.hypot(*np.diff(shorter, axis=0).T).sum() == pytest.approx(40.1, abs=0.5)
     assert (
-        "Walkways on other levels<br>way 16759161 · footway<br>level -1"
-        in traces["Walkways on other levels"].text
+        "Walkways on other levels\nway 16759161 · footway\nlevel -1"
+        in _texts(view, "Walkways on other levels")
     )
     assert {
-        "Vilhonkatu<br>way 29498962 · unclassified<br>level 0",
-        "Rautatientori<br>way 4247505 · unclassified<br>level 0",
-        "Rautatientori<br>way 34732049 · unclassified<br>level 0",
-    } <= set(traces["Walkways at street level"].text)
+        "Vilhonkatu\nway 29498962 · unclassified\nlevel 0",
+        "Rautatientori\nway 4247505 · unclassified\nlevel 0",
+        "Rautatientori\nway 34732049 · unclassified\nlevel 0",
+    } <= _texts(view, "Walkways at street level")
     edges, chains = _edges_by_way(merged)
     first, between, last = chains[tunnel_edge]
     assert (first, last) == tunnel_edge and between < merged[["u", "v"]].min().min()
@@ -246,28 +79,27 @@ def test_plot_network_draws_a_graph_made_by_hand():
     graph.add_edge(1, 2, geometry=line, id=10)
     graph.add_edge(2, 1, geometry=line.reverse(), id=10)
     graph.add_edge(1, 2, geometry=line, id=11, railway="platform")
-    kinds = ["Walkways at street level", "Platforms"]
-    traces = _traces(plot_network(graph))
-    assert list(traces) == kinds
-    assert len(traces["Walkways at street level"].x) == 3
+    kinds = ["Ground", "Walkways at street level", "Platforms"]
+    groups = _groups(plot_network(graph))
+    assert list(groups) == kinds
+    assert len(groups["Walkways at street level"]["items"]) == 1
     nx.set_node_attributes(graph, {1: 24.94, 2: 24.941}, "x")
     nx.set_node_attributes(graph, {1: 60.17, 2: 60.17}, "y")
-    assert list(_traces(plot_network(graph))) == kinds
+    assert list(_groups(plot_network(graph))) == kinds
     nx.set_node_attributes(graph, {1: "subway_entrance"}, "railway")
-    traces = _traces(plot_network(graph, center=(24.94, 60.17), radius=0))
-    assert list(traces) == kinds + ["Station entrances"]
+    groups = _groups(plot_network(graph, center=(24.94, 60.17), radius=0))
+    assert list(groups) == kinds + ["Station entrances"]
     graph.add_edge(2, 3, geometry=LineString([(24.941, 60.17), (24.95, 60.17)]), id=12)
     nx.set_node_attributes(graph, {3: 24.95}, "x")
     nx.set_node_attributes(graph, {3: 60.17}, "y")
-    traces = _traces(
-        plot_network(graph, center=(24.94, 60.17), radius=0, route=[1, 2, 3])
-    )
-    assert max(x for x in traces["Walkways at street level"].x if x is not None) < 100
-    assert max(x for x in traces["Route"].x if x is not None) > 500
-    traces = _traces(plot_network(graph, dem=lambda lons, lats: 100 * (lons - 24.94)))
-    assert list(traces["Walkways at street level"].z) == [0, 0.1, None, 0.1, 1.0, None]
-    assert list(traces["Platforms"].z) == [0, 0.1, None]
-    assert list(traces["Station entrances"].z) == [0]
+    view = plot_network(graph, center=(24.94, 60.17), radius=0, route=[1, 2, 3])
+    walkways = _groups(view)["Walkways at street level"]["items"]
+    assert max(p[0] for item in walkways for p in item["p"]) < 100
+    assert max(p[0] for item in _groups(view)["Route"]["items"] for p in item["p"]) > 500
+    view = plot_network(graph, dem=lambda lons, lats: 100 * (lons - 24.94))
+    assert _heights(view, "Walkways at street level") == [[0, 0.1], [0.1, 1.0]]
+    assert _heights(view, "Platforms") == [[0, 0.1]]
+    assert [i["c"][2] for i in _groups(view)["Station entrances"]["items"]] == [0]
 
 
 def test_plot_network_draws_merged_edges_made_by_hand():
@@ -276,12 +108,12 @@ def test_plot_network_draws_merged_edges_made_by_hand():
     The edge from node 1 to 2 has a value for each of its four segments: a street
     (way 10), two segments of a tunnel on layer -2 (way 11) and a street (way 12). It
     is drawn in three parts with new nodes below every node id, and a route runs along
-    them, here against the edge. With a terrain model of 10 m in the west, 14 m in the
-    east and a hill of 100 m above the middle of the tunnel, the tunnel runs straight
-    from 10 m to 14 m.
+    them, here against the edge, made of runs where one step goes on where the last
+    ended. With a terrain model of 10 m in the west, 14 m in the east and a hill of
+    100 m above the middle of the tunnel, the tunnel runs straight from 10 m to 14 m.
 
     Two edges are kept whole. The stairs from node 2 to 3 climb from level 0 to 1:
-    the hover text names both ways and both names. The edge from node 3 to -5 has two
+    their text names both ways and both names. The edge from node 3 to -5 has two
     segments, the two booleans of ``reversed`` and a list of three names: neither list
     splits it.
 
@@ -333,40 +165,35 @@ def test_plot_network_draws_merged_edges_made_by_hand():
         (2, 3),
         (3, -5),
     ]
-    traces = _traces(plot_network(graph, route=[-5, 3, 2, 1]))
-    assert set(traces["Walkways at street level"].text) - {None} == {
-        "A<br>way 10 · street<br>level 0",
-        "A<br>way 12 · street<br>level 0",
-        "X;Y;Z<br>way 15 · street<br>level 0",
+    view = plot_network(graph, route=[-5, 3, 2, 1])
+    assert _texts(view, "Walkways at street level") == {
+        "A\nway 10 · street\nlevel 0",
+        "A\nway 12 · street\nlevel 0",
+        "X;Y;Z\nway 15 · street\nlevel 0",
     }
-    assert set(traces["Walkways on other levels"].text) - {None} == {
-        "Walkways on other levels<br>way 11 · levels<br>level -2"
+    assert _texts(view, "Walkways on other levels") == {
+        "Walkways on other levels\nway 11 · levels\nlevel -2"
     }
-    assert set(traces["Stairs"].text) - {None} == {
-        "B;C<br>ways 13, 14 · stairs<br>levels 0 → 1"
-    }
-    along = [0, 0, 0, None, 4, 2, 0, None]  # the street and the stairs
-    along += [0, 0, None, -12, -12, -12, None, 0, 0, None]  # ways 12, 11 and 10
-    assert list(traces["Route"].z) == along
+    assert _texts(view, "Stairs") == {"B;C\nways 13, 14 · stairs\nlevels 0 → 1"}
+    # the street, the stairs and way 12 on, ways 11 and 10
+    assert _heights(view, "Route") == [[0, 0, 0], [4, 2, 0, 0], [-12, -12, -12], [0, 0]]
 
     def hill(longitudes, latitudes):
         east = (longitudes - 24.94) * 1e3
         return np.where(east < 1.2, 10.0, np.where(east < 1.8, 100.0, 14.0))
 
-    in_metres = _traces(plot_network(graph, dem=hill))
-    tunnel = in_metres["Walkways on other levels"].z
-    assert list(tunnel) == pytest.approx([10, 12, 14, None], abs=0.01)
+    tunnel = _heights(plot_network(graph, dem=hill), "Walkways on other levels")
+    assert tunnel == [pytest.approx([10, 12, 14], abs=0.05)]
 
     bend = LineString([(24.943, 60.17), (24.9415, 60.171), (24.94, 60.17)])
     graph.add_edge(2, 1, geometry=bend, id=16, length=100.0)
     assert _edges_by_way(_graph_frames(graph)[0])[1] == {}
-    by_levels = _traces(plot_network(graph, route=[1, 2]))
-    assert list(by_levels["Route"].z) == [0, 0, 0, None]
+    assert _heights(plot_network(graph, route=[1, 2]), "Route") == [[0, 0, 0]]
 
     def south(longitudes, latitudes):
         return np.where(latitudes < 60.1705, hill(longitudes, latitudes), np.nan)
 
-    assert "Route" not in _traces(plot_network(graph, route=[1, 2], dem=south))
+    assert "Route" not in _groups(plot_network(graph, route=[1, 2], dem=south))
 
 
 def test_plot_network_refuses_what_it_cannot_draw():

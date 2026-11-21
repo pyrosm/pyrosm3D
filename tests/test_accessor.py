@@ -46,9 +46,9 @@ def test_in3d_draws_the_network_of_its_osm_object(maunula_osm, dem):
         nodes, edges = maunula_osm.get_network(
             network_type, nodes=True, indoor_elements=True
         )
-        figure = in3d.plot_network(network_type, **near)
-        assert _summary(figure) == _summary(plot_network(edges, nodes, **near))
-        assert "Stairs" in {trace.name for trace in figure.data}
+        view = in3d.plot_network(network_type, **near)
+        assert view.data == plot_network(edges, nodes, **near).data
+        assert "Stairs" in {group["name"] for group in view.data["groups"]}
 
     graph = maunula_osm.get_graph(
         "walking", graph_type="networkx", indoor_elements=True
@@ -56,11 +56,10 @@ def test_in3d_draws_the_network_of_its_osm_object(maunula_osm, dem):
     stairs = [(u, v) for u, v, data in graph.edges(data=True) if data.get("vertical")]
     route = nx.shortest_path(graph, stairs[0][0], stairs[0][1], weight="length")
     drawn = in3d.plot_network(graph=graph, route=route, dem=dem)
-    assert _summary(drawn) == _summary(plot_network(graph, route=route, dem=dem))
-    assert "Route" in {trace.name for trace in drawn.data}
-    axis = "level" if dem is None else "height (m)"
-    assert drawn.layout.scene.zaxis.title.text == figure.layout.scene.zaxis.title.text
-    assert drawn.layout.scene.zaxis.title.text == axis
+    assert drawn.data == plot_network(graph, route=route, dem=dem).data
+    groups = {group["name"]: group for group in drawn.data["groups"]}
+    assert "Route" in groups
+    assert all(("m" in item) == (dem is not None) for item in groups["Stairs"]["items"])
 
 
 def test_in3d_reads_the_network_with_heights(maunula_osm):

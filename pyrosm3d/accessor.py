@@ -132,8 +132,8 @@ class In3D:
         graph=None,
         dem=None,
     ):
-        """A plotly Figure of the network with its indoor elements in 3D: the edges at
-        their levels, with stairs, escalators, lifts and platforms told apart.
+        """A 3D view of the network with its indoor elements: the edges at their levels,
+        with stairs, escalators, lifts and platforms told apart.
 
         Parameters
         ----------
@@ -147,8 +147,8 @@ class In3D:
             Draw only the edges that reach within this many metres of ``center``, and
             the station entrances within it; the ``route`` is drawn in full.
         route : list of node ids (optional)
-            A path through the network, drawn as a wide red line with markers at its
-            two ends.
+            A path through the network, drawn as a wide red line with points at its
+            two ends; the view starts over it.
         graph : igraph.Graph or networkx.MultiDiGraph (optional)
             A graph of ``get_graph(indoor_elements=True)``, such as the one that the
             ``route`` was found in. It is drawn instead of the network of
@@ -159,8 +159,8 @@ class In3D:
 
         Returns
         -------
-        plotly.graph_objects.Figure
-            The figure of :func:`pyrosm3d.plot_network`.
+        pyrosm3d.View
+            The view of :func:`pyrosm3d.plot_network`.
         """
         view = dict(center=center, radius=radius, route=route, dem=dem)
         if graph is not None:

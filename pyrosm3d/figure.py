@@ -26,14 +26,7 @@ from pyrosm3d.floors import (
     triangles,
 )
 from pyrosm3d.indoor import indoor_layers
-from pyrosm3d.network import (
-    _STYLES,
-    _Trace,
-    _edge_kinds,
-    _edge_text,
-    _line_points,
-    _lines,
-)
+from pyrosm3d.network import _STYLES, _edge_kinds, _edge_text, _line_points
 from pyrosm3d.styles import (
     AREA_STYLES,
     AXIS_STYLE,
@@ -42,6 +35,7 @@ from pyrosm3d.styles import (
     COLUMN_STYLES,
     DOOR_STYLE,
     FLOOR_HEIGHT,
+    HEIGHT_STRETCH,
     HOVER_LABEL,
     LEVEL_FLOOR_COLOUR,
     LEVEL_OUTLINE_COLOUR,
@@ -64,8 +58,40 @@ _NETWORK_LIFT = 0.15
 _POI_LIFT = 0.3
 # A floor keeps its colour from every direction
 _FLAT_LIGHT = dict(ambient=1, diffuse=0, specular=0, roughness=1, fresnel=0)
-# How much taller than to scale the levels are drawn, so that they stand apart
-_HEIGHT_STRETCH = 2.2
+
+
+class _Trace:
+    """The points of one legend entry, lines separated by gaps."""
+
+    def __init__(self):
+        self.x, self.y, self.z, self.text = [], [], [], []
+
+    def add(self, x, y, z, text, in_metres=False):
+        """Add one line through the points ``x``, ``y``, ``z`` (rounded to hundredths),
+        labelled ``text``, and with the height of each point when ``z`` is
+        ``in_metres``."""
+        self.x += np.round(x, 2).tolist() + [None]
+        self.y += np.round(y, 2).tolist() + [None]
+        self.z += np.round(z, 2).tolist() + [None]
+        if in_metres:
+            self.text += ["%s<br>%.1f m" % (text, height) for height in z] + [None]
+        else:
+            self.text += [text] * len(x) + [None]
+
+
+def _lines(trace, name, colour, width, dash):
+    """A plotly line trace of the points of ``trace``, its own group in the legend."""
+    return go.Scatter3d(
+        x=trace.x,
+        y=trace.y,
+        z=trace.z,
+        text=trace.text,
+        mode="lines",
+        name=name,
+        legendgroup=name,
+        line=dict(color=colour, width=width, dash=dash),
+        hovertemplate="%{text}<extra></extra>",
+    )
 
 
 def plot_indoor(elements, edges=None, nodes=None, buildings=None, level=None):
@@ -495,7 +521,7 @@ def _layout(box, levels, between=()):
     longest = max(width, height)
     labelled = [lv for lv in levels if lv.is_integer() or lv in between]
     z_range = [levels[0] * FLOOR_HEIGHT - 1, levels[-1] * FLOOR_HEIGHT + 2]
-    z_aspect = (z_range[1] - z_range[0]) * _HEIGHT_STRETCH / longest
+    z_aspect = (z_range[1] - z_range[0]) * HEIGHT_STRETCH / longest
     z_aspect = min(1.1, max(0.12, z_aspect))
     return dict(
         scene=dict(

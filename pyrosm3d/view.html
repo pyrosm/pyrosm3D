@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>@@TITLE@@</title>
+<style>
+  :root { color-scheme: light; --ground: #eef0f3; --surface: #ffffff; --ink: #1b2129;
+    --muted: #5a6470; --line: #d5dae1; --alert: #9c1c1c; --alert-ground: #fdecec;
+    --text: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --left: max(16px, env(safe-area-inset-left, 0px));
+    --right: max(16px, env(safe-area-inset-right, 0px)); }
+  html, body { height: 100%; }
+  body { margin: 0; overflow: hidden; background: var(--ground); color: var(--ink);
+    font: 15px/1.45 var(--text); }
+  #stage { position: fixed; inset: 0; background: var(--ground); }
+  #canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  .panel { position: fixed; box-sizing: border-box; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(27, 33, 41, 0.14); }
+  #head { top: calc(10px + env(safe-area-inset-top, 0px)); left: var(--left);
+    max-width: min(23rem, calc(100% - var(--left) - var(--right))); padding: 8px 12px; }
+  h1 { margin: 0; font: 600 1.05rem/1.25 var(--text); }
+  summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; padding: 4px 0; }
+  ul { margin: 4px 0 2px; padding-left: 1.1rem; font-size: 0.85rem; }
+  li { margin-bottom: 3px; }
+  #bottom { position: fixed; left: var(--left); right: var(--right);
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px)); max-width: 30rem;
+    margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
+  #bottom .panel { position: static; padding: 8px 12px; }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .row label { display: flex; align-items: center; gap: 8px; flex: 1 1 12rem; min-width: 0; }
+  .row label.switch { flex: 0 0 auto; font-weight: 600; min-height: 32px; margin-right: 10px; }
+  button.hold { flex: 1 1 0; min-height: 48px; font-size: 1rem; touch-action: none; }
+  .panel, button { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--ink); }
+  input[type="range"] { flex: 1 1 auto; min-width: 0; height: 28px; accent-color: var(--ink); }
+  button { font: 600 0.85rem var(--text); color: var(--ink); background: var(--ground);
+    border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
+  button:disabled { color: var(--muted); opacity: 0.5; }
+  button.on { color: var(--surface); background: var(--ink); border-color: var(--ink); }
+  select { flex: 1 1 auto; min-width: 0; font: 600 0.85rem var(--text); color: var(--ink);
+    background: var(--ground); border: 1px solid var(--line); border-radius: 8px;
+    padding: 7px 10px; }
+  #layers { display: grid; gap: 4px; max-height: 38vh; overflow-y: auto; padding: 4px 0; }
+  #layers label { display: flex; align-items: center; gap: 8px; font-size: 0.85rem;
+    min-height: 28px; }
+  .swatch { flex: none; width: 14px; height: 14px; border-radius: 3px;
+    border: 1px solid rgba(27, 33, 41, 0.25); }
+  #info { font-size: 0.85rem; white-space: pre-line; overflow-wrap: anywhere; }
+  #error { top: calc(10px + env(safe-area-inset-top, 0px)); left: var(--left);
+    right: var(--right); padding: 10px 12px; color: var(--alert);
+    background: var(--alert-ground); border-color: var(--alert); z-index: 5; }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="canvas"></canvas></div>
+<div id="error" class="panel" hidden></div>
+<div id="head" class="panel">
+  <h1>@@TITLE@@</h1>
+  <details>
+    <summary>What this is and how to move</summary>
+    <ul>
+      <li>@@ABOUT@@</li>
+      <li>One finger moves the view along the ground. A pinch zooms, and twisting the two fingers turns it. Three fingers moved up or down tilt it, and so does the slider.</li>
+      <li>The view tilts all the way: from straight above, past the side, to below the ground. Seen from the side, one finger moves the view up and down as well.</li>
+      <li>With a mouse: drag to move and scroll to zoom. To turn and tilt, drag with Shift held or with the right button, or use the Turn and Tilt sliders.</li>
+      <li>The views: "Buildings" is the solid model, where the ground and buildings hide what is inside and below them. "See through" turns the model into a map, where the walkways inside buildings and below ground show; those below ground are paler.</li>
+      <li>A view with indoor elements also has "Indoor": the indoor mapping alone, without the ground. The floors are plates, one above the other. "Level" shows one level alone. Lifts and moving walkways are dashed lines. Layers that are off at the start are in "Layers".</li>
+      <li>"True heights": on, heights are drawn to scale; off, they are drawn taller, so that what lies above and below each other stands apart. "Buildings" and "See through" start with it on, "Indoor" with it off; each remembers its own choice. Walking is always to scale.</li>
+      <li>"Walk" puts you on the ground in the middle of the view. Hold "Forward" to walk the way you look, faster the longer you hold; one finger looks around; a pinch also moves you. You walk on the ground and on the walkways of the network: walk along stairs, an escalator or a ramp and they take you down and up, also below ground. At a lift, buttons appear that take you to its next stop up or down. You walk through walls. Switch "Walk" off to fly again from where you stand. With a mouse: drag to look, scroll or the arrow keys to move.</li>
+      <li>The Tilt and Turn sliders tilt and turn the view; the buttons below them look from above, from the side, with north up, or go back to the start.</li>
+      <li>Tap a line or a floor to read what it is.</li>
+    </ul>
+  </details>
+</div>
+<div id="bottom">
+<div id="info" class="panel" hidden></div>
+<div id="tools" class="panel">
+  <div class="row">
+    <label>Tilt <input id="tilt" type="range" min="-90" max="90" step="1"></label>
+  </div>
+  <div class="row">
+    <label>Turn <input id="turn" type="range" min="-180" max="180" step="1"></label>
+  </div>
+  <div class="row">
+    <span>View</span>
+    <button id="viewSolid" type="button">Buildings</button>
+    <button id="viewThrough" type="button">See through</button>
+    <button id="viewIndoor" type="button" hidden>Indoor</button>
+  </div>
+  <div class="row" id="levels" hidden>
+    <label>Level <select id="level"></select></label>
+  </div>
+  <div class="row">
+    <label class="switch"><input id="walk" type="checkbox"> Walk</label>
+    <label class="switch" id="heights"><input id="trueHeights" type="checkbox"> True heights</label>
+  </div>
+  <div class="row" id="moves" hidden>
+    <button id="ahead" class="hold" type="button">▲ Forward</button>
+    <button id="back" class="hold" type="button">▼ Back</button>
+  </div>
+  <div class="row" id="lifts" hidden>
+    <span>Lift here:</span>
+    <button id="liftUp" type="button">▲ Up</button>
+    <button id="liftDown" type="button">▼ Down</button>
+  </div>
+  <div class="row">
+    <button id="above" type="button">From above</button>
+    <button id="side" type="button">From the side</button>
+    <button id="north" type="button">North up</button>
+    <button id="home" type="button">Start view</button>
+  </div>
+  <details>
+    <summary>Layers</summary>
+    <div id="layers"></div>
+  </details>
+</div>
+</div>
+<script id="data" type="application/json">@@DATA@@</script>
+<script src="@@DECK_GL@@"></script>
+<script>
+@@SCRIPT@@
+</script>
+</body>
+</html>

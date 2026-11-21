@@ -21,9 +21,16 @@ The functions draw frames that were read with pyrosm, also after you have change
 .. autofunction:: pyrosm3d.plot_network
 ```
 
-## Figures on touch screens
+## Views and figures
 
-The figures that the functions above return are plotly figures of this class.
+`plot_network` returns a deck.gl view of this class.
+
+```{eval-rst}
+.. autoclass:: pyrosm3d.View
+   :members: to_html, show
+```
+
+`plot_indoor` returns a plotly figure of this class.
 
 ```{eval-rst}
 .. autoclass:: pyrosm3d.touch.TouchFigure
