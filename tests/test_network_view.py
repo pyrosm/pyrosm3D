@@ -7,7 +7,7 @@ from shapely.geometry import LineString, Point
 
 from pyrosm3d import network_heights, plot_network
 from pyrosm3d.dem import sample_dem
-from pyrosm3d.network import _STYLES
+from pyrosm3d.network import _STYLES, _terrain_ground
 
 
 def _groups(view):
@@ -115,7 +115,10 @@ def test_plot_network_draws_heights_in_metres(helsinki_centre, helsinki_dem):
     lift, entrance, on_ground = 2039713549, 249350774, 2261292460
     view = plot_network(edges, nodes, route=[-lift * 1000 - 1, lift], dem=helsinki_dem)
     groups = _groups(view)
-    assert "Ground" not in groups
+    grid = groups["Ground"]["grid"]
+    drawn, terrain = (np.array(grid[key], dtype=float) for key in ("z", "t"))
+    assert grid["step"] >= 10.0 and np.isfinite(terrain).all()
+    assert (drawn <= terrain - 0.4 + 1e-6).all()  # under the terrain, lower near lines
     ends = found.loc[lift, ["u_height", "v_height"]].round(2).tolist()
     assert ends == [-7.89, 4.09]
     item = groups["Lifts"]["items"][0]
@@ -229,8 +232,8 @@ def test_plot_network_keeps_edges_without_ids_apart():
 
 @pytest.mark.parametrize("radius, dem", [(None, None), (60, None), (None, "slope")])
 def test_plot_network_draws_buildings(maunula_osm, radius, dem):
-    """The buildings stand on the ground with the network: on the flat ground, which
-    reaches under them, or on the terrain; with a radius only those that reach within
+    """The buildings stand on the ground with the network: on the flat ground or on
+    the terrain, which reaches under them; with a radius only those that reach within
     it. A building part with a height is drawn from under the ground, and the start
     view stays that of the network."""
     nodes, edges = maunula_osm.get_network("walking", nodes=True, indoor_elements=True)
@@ -262,17 +265,52 @@ def test_plot_network_draws_buildings(maunula_osm, radius, dem):
         assert len(blocks) < everywhere
         far = [shapely.Polygon(item["r"][0]).distance(shapely.Point(0, 0)) for item in blocks]
         assert max(far) <= radius
-    if dem is None:
-        grid = view.data["groups"][0]["grid"]
-        corners = np.array([point[:2] for item in blocks for point in item["r"][0]])
-        assert (corners >= [grid["x"], grid["y"]]).all()
-        assert (corners <= [grid["x"] + grid["step"], grid["y"] + grid["step"]]).all()
+    grid = view.data["groups"][0]["grid"]
+    corners = np.array([point[:2] for item in blocks for point in item["r"][0]])
+    far = [(grid["columns"] - 1) * grid["step"], (grid["rows"] - 1) * grid["step"]]
+    assert (corners >= [grid["x"], grid["y"]]).all()
+    assert (corners <= np.add([grid["x"], grid["y"]], far)).all()
     if dem is None and radius is None:
         (drawn_part,) = [item for item in blocks if "part" in item]
         assert drawn_part["h"] == 30.4
     if dem is not None:
-        assert view.data["groups"][0]["kind"] == "buildings"
+        assert view.data["groups"][1]["kind"] == "buildings"
         _, south, _, north = buildings.total_bounds
         heights = [item["g"] for item in blocks]
         assert slope(0, south) - 0.1 <= min(heights) < max(heights)
         assert max(heights) <= slope(0, north) + 0.1
+
+
+def test_terrain_ground_stays_under_what_is_at_the_surface():
+    """The ground on a terrain lies 0.4 m under it, and lower around a square where it
+    would rise over a line at the surface, by as much as it would: here a line half a
+    metre under a flat terrain of 10 m, also between two of its points 30 m apart. A
+    line deeper than 1.5 m under the terrain is below ground and changes nothing. A
+    corner without a terrain height has none, and a wide view has wider squares."""
+
+    def flat(x, y):
+        return np.where(np.asarray(x) < 290, 10.0, np.nan)
+
+    surface = [[-5.0, 5.0, 9.5], [25.0, 5.0, 9.5]]
+    deep = [[-5.0, 45.0, 8.0], [25.0, 45.0, 8.0]]
+    grid = _terrain_ground([surface, deep], [], flat, (0.0, 0.0))["grid"]
+    assert (grid["x"], grid["y"], grid["step"]) == (-25.0, -15.0, 10.0)
+    drawn = np.array(grid["z"], dtype=float).reshape(grid["rows"], grid["columns"])
+    terrain = np.array(grid["t"], dtype=float).reshape(drawn.shape)
+    assert np.isfinite(terrain).all() and (terrain == 10.0).all()
+    lowered = 9.6 - drawn
+    # the squares that hold the surface line, from x -5 to 35 and y 5 to 15, and
+    # every corner of them, come down by half a metre; nothing else does
+    assert set(np.round(lowered[2:4, 2:7].ravel(), 2)) == {0.5}
+    lowered[2:4, 2:7] = 0
+    assert np.allclose(lowered, 0)
+
+    # 2 km and 20 m on each side: 21 m squares hold it in at most 100
+    wide = _terrain_ground([[[0.0, 0.0, 10.0], [2000.0, 0.0, 10.0]]], [], flat, (0, 0))
+    grid = wide["grid"]
+    assert grid["step"] == 21.0 and 2040 <= (grid["columns"] - 1) * 21.0
+    assert grid["columns"] - 1 <= 100
+    assert grid["z"][-1] is None and grid["t"][-1] is None
+    # 1 km with the margins, from no multiple of the width: still 100 across
+    offset = [[[3.3, 0.0, 10.0], [963.3, 0.0, 10.0]]]
+    assert _terrain_ground(offset, [], flat, (0, 0))["grid"]["columns"] == 101

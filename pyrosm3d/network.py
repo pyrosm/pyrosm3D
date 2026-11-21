@@ -91,9 +91,13 @@ _OFF_AT_START = ("crossing",)
 # and keeps this share of its opacity in the see-through view
 _BELOW_GROUND = -1.5
 _BELOW_SHARE = 0.6
-# The ground: a grey surface GROUND_DROP under street level, as far as the network and
-# this many metres around it
+# The ground: a grey surface GROUND_DROP under street level or the terrain, as far as
+# the network and this many metres around it
 _GROUND_COLOUR = "#dde1e6"
+# The ground on a terrain is squares at least this many metres wide, and so wide that a
+# view holds at most this many across; the lines at the surface count for it at points
+# at most this many metres apart
+_TERRAIN_STEP, _TERRAIN_SQUARES, _SURFACE_STEP = 10.0, 100, 20.0
 _GROUND_MARGIN = 20.0
 
 
@@ -615,8 +619,10 @@ def plot_network(
         keep=None if radius is None else lambda shapes: _near(shapes, middle, radius),
     )
     groups = blocks + groups
-    if not in_metres:
-        footprints = [item["r"][0] for group in blocks for item in group["items"]]
+    footprints = [item["r"][0] for group in blocks for item in group["items"]]
+    if in_metres:
+        groups.insert(0, _terrain_ground(paths, footprints, _terrain(crs, dem), origin))
+    else:
         groups.insert(0, _flat_ground(paths + footprints))
     shown = [item["p"] for item in route_groups[0]["items"]] if route_groups else paths
     ground_at = _ground_at_middle(crs, origin, dem)
@@ -802,6 +808,97 @@ def _ground_at_middle(crs, origin, dem):
         return float(height) if np.isfinite(height) else 0.0
 
     return ground
+
+
+def _surface_points(paths):
+    """The points of ``paths`` (lists of ``[x, y, z]``) and, between two of them more
+    than ``_SURFACE_STEP`` apart, points along the line at most that far apart, as an
+    array of x, y and z."""
+    found = []
+    for path in paths:
+        points = np.asarray(path, dtype=float)
+        found.append(points[:1])
+        for start, end in zip(points[:-1], points[1:]):
+            pieces = max(1, int(np.ceil(np.hypot(*(end - start)[:2]) / _SURFACE_STEP)))
+            share = np.arange(1, pieces + 1)[:, None] / pieces
+            found.append(start + share * (end - start))
+    return np.concatenate(found)
+
+
+def _lowered_corners(at_corners, points, xs, ys):
+    """How far each corner of the squares of a ground with the heights ``at_corners``
+    (rows from south to north at ``ys``, columns from west to east at ``xs``) has to
+    come down so that no square rises over any of ``points`` (x, y, z) in it. A square
+    is drawn as two triangles, split along either diagonal, so it may not rise over a
+    point by either split; each corner comes down by the most that a square around it
+    needs."""
+    step = xs[1] - xs[0]
+    across, up = (points[:, 0] - xs[0]) / step, (points[:, 1] - ys[0]) / step
+    column, line = np.floor(across).astype(int), np.floor(up).astype(int)
+    inside = (column >= 0) & (line >= 0) & (column < len(xs) - 1) & (line < len(ys) - 1)
+    column, line, points = column[inside], line[inside], points[inside]
+    s, t = across[inside] - column, up[inside] - line
+    sw, se = at_corners[line, column], at_corners[line, column + 1]
+    nw, ne = at_corners[line + 1, column], at_corners[line + 1, column + 1]
+    one = np.where(
+        s >= t, sw + s * (se - sw) + t * (ne - se), sw + t * (nw - sw) + s * (ne - nw)
+    )
+    other = np.where(
+        s + t <= 1,
+        sw + s * (se - sw) + t * (nw - sw),
+        ne + (1 - s) * (nw - ne) + (1 - t) * (se - ne),
+    )
+    over = np.nan_to_num(np.maximum(one, other) - points[:, 2], nan=0.0).clip(min=0)
+    most = np.zeros((len(ys) - 1, len(xs) - 1))
+    np.maximum.at(most, (line, column), over)
+    lowered = np.zeros(at_corners.shape)
+    for down in (0, 1):
+        for right in (0, 1):
+            part = lowered[down : down + len(ys) - 1, right : right + len(xs) - 1]
+            np.maximum(part, most, out=part)
+    return lowered
+
+
+def _terrain_ground(paths, footprints, terrain, origin):
+    """The ground of a view on a terrain: squares over the points of ``paths`` and
+    ``footprints`` (lists of ``[x, y, z]`` in metres from ``origin``) and
+    ``_GROUND_MARGIN`` around them, ``_TERRAIN_STEP`` wide or wider so that the view
+    holds at most ``_TERRAIN_SQUARES`` across. Its corners lie ``GROUND_DROP`` under
+    ``terrain`` (heights at points in the metres of ``origin``), and lower where a
+    square would rise over a point of ``paths`` at the surface (not more than
+    ``_BELOW_GROUND`` under the terrain), so that it hides nothing at the surface; the
+    walker stands on the terrain itself (``t``). A corner where the terrain has no
+    height has none, and no square touches it."""
+    xy = np.array([point[:2] for path in paths + footprints for point in path])
+    low, high = xy.min(axis=0) - _GROUND_MARGIN, xy.max(axis=0) + _GROUND_MARGIN
+    step = max(_TERRAIN_STEP, float(np.ceil((high - low).max() / _TERRAIN_SQUARES)))
+    columns, rows = np.ceil((high - low) / step).astype(int) + 1
+    xs, ys = low[0] + step * np.arange(columns), low[1] + step * np.arange(rows)
+    grid_x, grid_y = np.meshgrid(xs, ys)
+    at_corners = np.asarray(
+        terrain(grid_x.ravel() + origin[0], grid_y.ravel() + origin[1]), dtype=float
+    ).reshape(grid_x.shape)
+    points = _surface_points(paths)
+    under = np.asarray(terrain(points[:, 0] + origin[0], points[:, 1] + origin[1]))
+    at_surface = np.isfinite(under) & (points[:, 2] - under >= _BELOW_GROUND)
+    lowered = _lowered_corners(at_corners, points[at_surface], xs, ys)
+    drawn = at_corners - lowered - GROUND_DROP
+
+    def heights(values):
+        return [None if not np.isfinite(v) else round(float(v), 1) for v in values]
+
+    grid = dict(
+        x=round(float(xs[0]), 1),
+        y=round(float(ys[0]), 1),
+        step=step,
+        rows=len(ys),
+        columns=len(xs),
+        z=heights(drawn.ravel()),
+        t=heights(at_corners.ravel()),
+    )
+    return dict(
+        name="Ground", kind="ground", colour=_GROUND_COLOUR, visible=True, grid=grid
+    )
 
 
 def _flat_ground(paths):
