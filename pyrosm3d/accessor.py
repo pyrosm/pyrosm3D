@@ -50,7 +50,7 @@ class In3D:
         )
         return self._osm.get_buildings(), parts
 
-    def plot_indoor(self, level=None):
+    def plot_indoor(self, level=None, dem=None):
         """A 3D view of the indoor elements: the floors of rooms, corridors, platforms
         and walking areas at their levels, walls with door gaps, the columns of
         stairwells and lift shafts, and the walking network, with the buildings
@@ -60,15 +60,18 @@ class In3D:
         ----------
         level : float (optional)
             The level that the indoor view opens on; by default all levels.
+        dem : str or pathlib.Path, a sequence of them, or a function (optional)
+            A terrain model, as :meth:`get_network` takes it: the levels are then at
+            heights in metres (see :func:`pyrosm3d.plot_indoor`).
 
         Returns
         -------
         pyrosm3d.View
             The view of :func:`pyrosm3d.plot_indoor`.
         """
-        return plot_indoor(**self._indoor_frames(), level=level)
+        return plot_indoor(**self._indoor_frames(), level=level, dem=dem)
 
-    def to_html(self, path, title="Indoor elements", deck_gl=DECK_GL):
+    def to_html(self, path, title="Indoor elements", deck_gl=DECK_GL, dem=None):
         """Write the 3D view of the indoor elements of :meth:`plot_indoor` as a web
         page, in which the level picker names the number of areas on each level and a
         tapped element shows its OpenStreetMap tags.
@@ -82,13 +85,16 @@ class In3D:
         deck_gl : str
             Where the page loads the deck.gl library from (see
             :meth:`pyrosm3d.View.to_html`).
+        dem : str or pathlib.Path, a sequence of them, or a function (optional)
+            A terrain model (see :meth:`plot_indoor`).
 
         Returns
         -------
         pathlib.Path
             The file written, as :func:`pyrosm3d.to_html` writes it.
         """
-        return to_html(path=path, title=title, deck_gl=deck_gl, **self._indoor_frames())
+        frames = self._indoor_frames()
+        return to_html(path=path, title=title, deck_gl=deck_gl, dem=dem, **frames)
 
     def _network(self, network_type, **read_options):
         """The nodes and edges of ``get_network(network_type, nodes=True,

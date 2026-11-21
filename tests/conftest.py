@@ -57,6 +57,16 @@ def helsinki_centre(helsinki_centre_osm):
 
 
 @pytest.fixture(scope="session")
+def helsinki_station_frames():
+    """The frames that the ``in3d`` accessor reads for the indoor views around the
+    railway station of Helsinki, as the arguments of ``plot_indoor``."""
+    import cafein.sampledata.helsinki as helsinki
+
+    box = [24.9370, 60.1680, 24.9440, 60.1720]
+    return In3D(OSM(str(helsinki.osm_pbf), bounding_box=box))._indoor_frames()
+
+
+@pytest.fixture(scope="session")
 def maunula_osm():
     """pyrosm's reader of Maunula-talo, a community centre in Helsinki with three
     mapped floors."""

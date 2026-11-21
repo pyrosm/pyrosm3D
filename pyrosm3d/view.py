@@ -89,13 +89,15 @@ def polygon_parts(shape):
 def polygon_rings(shape, z, origin, decimals=2):
     """The rings of each polygon of ``shape`` (in metres) as items of a view take
     them: for each polygon a list of rings, each a list of ``[x, y, z]`` points in
-    metres from ``origin`` at the height ``z``, rounded to ``decimals``."""
+    metres from ``origin``, rounded to ``decimals``. ``z`` is a height, or a function
+    ``(x, y) -> heights`` at points in the metres of ``shape``."""
     found = []
     for polygon in shapely.get_parts(shape):
         rings = []
         for ring in (polygon.exterior, *polygon.interiors):
-            xy = shapely.get_coordinates(ring) - origin
-            points = np.column_stack([xy, np.full(len(xy), z)])
+            xy = shapely.get_coordinates(ring)
+            heights = z(xy[:, 0], xy[:, 1]) if callable(z) else np.full(len(xy), z)
+            points = np.column_stack([xy - origin, heights])
             rings.append(points.round(decimals).tolist())
         found.append(rings)
     return found

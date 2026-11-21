@@ -8,8 +8,11 @@ import shapely
 
 from pyrosm3d.columns import shaft_columns
 from pyrosm3d.floors import floor_levels, floor_openings
+from pyrosm3d import network_heights
+from pyrosm3d.indoor import indoor_layers
 from pyrosm3d.indoor_view import (
     IndoorBox,
+    LevelHeights,
     element_notes,
     indoor_groups,
     indoor_stretch,
@@ -497,3 +500,75 @@ def test_plot_indoor_draws_the_buildings_in_its_box(maunula, maunula_frames):
     corners = np.array([point[:2] for item in blocks for point in item["r"][0]])
     assert (corners >= [grid["x"], grid["y"]]).all()
     assert (corners <= [grid["x"] + grid["step"], grid["y"] + grid["step"]]).all()
+
+
+def test_plot_indoor_on_a_terrain(helsinki_station_frames, helsinki_dem):
+    """With a terrain model a level is at the heights of the network's nodes on it in
+    its building, and a level without them at the nearest level with them moved by 4 m
+    a level above the ground floor and 6 m below; outside buildings at the terrain
+    moved so, as at the middle of the view; a floor outside buildings near the terrain
+    follows it. The edges have their heights, and the ground and the buildings lie on
+    the terrain."""
+    frames = helsinki_station_frames
+    view = plot_indoor(**frames, dem=helsinki_dem)
+    indoor, groups = view.data["indoor"], _groups(view)
+    by_level = {level: height for level, height, _ in indoor["levels"]}
+    assert by_level[0.0] == indoor["ground"] > 0
+    assert by_level[-1.0] == pytest.approx(indoor["ground"] - 6.0)
+    assert by_level[1.0] == pytest.approx(indoor["ground"] + 4.0)
+    assert groups["Ground"]["grid"]["t"][0] is not None
+    assert all("m" in item for item in groups["Stairs"]["items"])
+    assert min(item["g"] for item in groups["Buildings"]["items"]) > 0
+    draped = [
+        item
+        for item in groups["Platform areas"]["items"]
+        if len({point[2] for point in item["r"][0]}) > 1
+    ]
+    assert draped  # outdoor platforms on the terrain
+
+    edges = network_heights(frames["edges"], helsinki_dem)
+    layers = indoor_layers(frames["elements"], frames["nodes"], edges, frames["buildings"])
+    heights = LevelHeights(layers, lambda x, y: np.full(len(x), 1.0))
+    # a floor outside buildings with a height from the network where the terrain has
+    # none keeps that height; with the terrain there, near it, it follows it
+    west, south = layers.buildings.total_bounds[:2]
+    far = shapely.box(west - 500, south - 500, west - 480, south - 480)
+    nowhere = LevelHeights(layers, lambda x, y: np.full(len(x), np.nan))
+    nowhere._nodes_height_on = lambda polygon, level: 5.0
+    assert nowhere.floor(far, 0.0) == pytest.approx(4.85)
+    flat = LevelHeights(layers, lambda x, y: np.full(len(x), 4.5))
+    flat._nodes_height_on = lambda polygon, level: 5.0
+    assert callable(flat.floor(far, 0.0))
+    building, known = max(heights.in_building.items(), key=lambda item: len(item[1]))
+    spot = layers.buildings.geometry.iloc[building].representative_point()
+    levels = sorted(known)
+    assert heights(spot.x, spot.y, levels[0]) == known[levels[0]]
+    above = levels[-1] + 1
+    assert heights(spot.x, spot.y, above) == pytest.approx(known[levels[-1]] + 4.0)
+
+
+def test_what_has_no_height_is_left_out(maunula, maunula_frames):
+    """What has no height on the terrain is left out: the floors, walls, columns,
+    doors, shops and outlines; with no heights at all there is nothing to draw.
+    Without a network the levels lie on the terrain."""
+
+    def nowhere(*place):
+        return np.nan
+
+    assert indoor_groups(IndoorBox(maunula), (0.0, 0.0), nowhere, nowhere) == []
+
+    def two_levels(x, y, level):
+        return 10.0 * level if level < 2 else np.nan
+
+    groups = {
+        group["name"]: group
+        for group in indoor_groups(IndoorBox(maunula), (0.0, 0.0), two_levels)
+    }
+    walls = groups["Walls (rooms and indoor=wall)"]["items"]
+    assert walls and all(np.isfinite(item["h"]) for item in walls)
+    assert {item["h"] for item in walls if item["l"] == 1.0} == {1.6}  # no full storey
+    with pytest.raises(ValueError, match="no heights in the terrain model"):
+        plot_indoor(**maunula_frames, dem=lambda lon, lat: np.full(len(lon), np.nan))
+    flat = plot_indoor(maunula_frames["elements"], dem=lambda lon, lat: lon * 0 + 20)
+    levels = {level: height for level, height, _ in flat.data["indoor"]["levels"]}
+    assert levels == {0.0: 20.0, 1.0: 24.0, 2.0: 28.0}

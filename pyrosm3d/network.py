@@ -22,7 +22,8 @@ from collections import namedtuple
 import numpy as np
 import pandas as pd
 import shapely
-from geopandas import GeoDataFrame, GeoSeries
+from geopandas import GeoDataFrame
+from pyproj import Transformer
 
 from pyrosm3d.buildings import _street_level, frame_building_groups
 from pyrosm3d.dem import sample_dem
@@ -787,10 +788,11 @@ def _terrain(crs, dem):
     """The heights of the terrain model ``dem`` at points in the metres of ``crs``,
     NaN where it has none, as a function ``(x, y) -> heights``."""
 
+    to_lonlat = Transformer.from_crs(crs, 4326, always_xy=True)
+
     def heights(x, y):
-        points = GeoSeries(shapely.points(np.asarray(x), np.asarray(y)), crs=crs)
-        lonlat = points.to_crs(4326)
-        return sample_dem(lonlat.x.to_numpy(), lonlat.y.to_numpy(), dem)
+        longitudes, latitudes = to_lonlat.transform(np.asarray(x), np.asarray(y))
+        return sample_dem(longitudes, latitudes, dem)
 
     return heights
 
