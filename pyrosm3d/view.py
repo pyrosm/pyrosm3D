@@ -61,6 +61,13 @@ DECK_GL = "https://cdn.jsdelivr.net/npm/deck.gl@8.9.35/dist.min.js"
 _SCRIPTS = ("view_layers.js", "view_walk.js", "view_camera.js", "view_page.js")
 # Pixels that the frame of a view is high in a notebook
 _FRAME_HEIGHT = 620
+# The frame runs the page's scripts and opens its links in a window of their own, but
+# shares nothing with the notebook
+_FRAME_SANDBOX = "allow-scripts allow-popups allow-popups-to-escape-sandbox"
+# The characters at which a notebook splits a line of an output, but U+0085, which a
+# character reference cannot write (HTML reads &#133; as an ellipsis): the page's data
+# writes it as a JSON escape, and its title and about text as a line break
+_LINE_BREAKS = re.compile("[\n\r\x0b\x0c\x1c\x1d\x1e\u2028\u2029]")
 
 
 def package_text(name):
@@ -70,9 +77,12 @@ def package_text(name):
 
 def _script_json(data):
     """``data`` as JSON that can stand in a script element of a page: the characters
-    that could end the element or start markup are written as escapes."""
+    that could end the element or start markup, and those that break a line, are
+    written as escapes."""
     text = json.dumps(data, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-    return text.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+    for character in "<>&\x85\u2028\u2029":
+        text = text.replace(character, "\\u%04x" % ord(character))
+    return text
 
 
 def polygon_parts(shape):
@@ -153,8 +163,8 @@ class View:
         """
         _check_names(self.data)
         values = {
-            "TITLE": html.escape(self.title),
-            "ABOUT": html.escape(self.about),
+            "TITLE": html.escape(self.title.replace("\x85", "\n")),
+            "ABOUT": html.escape(self.about.replace("\x85", "\n")),
             "DECK_GL": html.escape(deck_gl),
             "DATA": _script_json(self.data),
             "SCRIPT": "\n".join(package_text(name) for name in _SCRIPTS),
@@ -171,11 +181,17 @@ class View:
         return path
 
     def _repr_html_(self):
-        """The view as the output of a notebook cell: a frame that holds the page."""
+        """The view as the output of a notebook cell: a sandboxed frame that holds the
+        page (see ``_FRAME_SANDBOX``) and sends no referrer, on one line: the
+        characters that break a line are written as character references."""
+        page = _LINE_BREAKS.sub(
+            lambda found: "&#%d;" % ord(found[0]),
+            html.escape(self.to_html(), quote=True),
+        )
         return (
-            '<iframe srcdoc="%s" style="width: 100%%; height: %dpx; border: none" '
-            'allow="fullscreen"></iframe>'
-            % (html.escape(self.to_html(), quote=True), _FRAME_HEIGHT)
+            '<iframe srcdoc="%s" sandbox="%s" referrerpolicy="no-referrer" '
+            'style="width: 100%%; height: %dpx; border: none" allow="fullscreen">'
+            "</iframe>" % (page, _FRAME_SANDBOX, _FRAME_HEIGHT)
         )
 
     def show(self):

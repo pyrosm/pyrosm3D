@@ -90,11 +90,21 @@ def test_each_group_needs_a_name_of_its_own():
 
 
 def test_a_view_in_a_notebook_is_a_frame_of_its_page():
-    """The output of a notebook cell is a frame whose ``srcdoc`` holds the page."""
-    view = View(_page_data(), title="t")
+    """The output of a notebook cell is a sandboxed frame, which runs the page's scripts
+    and opens its links but shares nothing with the notebook, and neither the frame
+    nor its page sends a referrer; its ``srcdoc``
+    holds the page on one line, also when its title and data hold characters that
+    break lines."""
+    data = _page_data()
+    data["groups"][0]["name"] += "\u2029\x85"
+    view = View(data, title="t\r\u2028\x85", about="a\x85b")
     frame = view._repr_html_()
-    assert frame.startswith("<iframe srcdoc=")
-    held = re.search(r'srcdoc="(.*?)" style', frame, re.S)[1]
+    assert frame.startswith("<iframe srcdoc=") and len(frame.splitlines()) == 1
+    sandbox = 'sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"'
+    assert sandbox in frame and "allow-same-origin" not in frame
+    assert 'referrerpolicy="no-referrer"' in frame
+    assert '<meta name="referrer" content="no-referrer">' in view.to_html()
+    held = re.search(r'srcdoc="(.*?)" sandbox', frame, re.S)[1]
     assert html.unescape(held) == view.to_html()
 
 
