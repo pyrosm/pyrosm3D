@@ -19,6 +19,7 @@ import numpy as np
 import shapely
 
 from pyrosm3d.styles import FLOOR_HEIGHT, GROUND_DROP
+from pyrosm3d.tags import is_missing, row_tags
 from pyrosm3d.view import polygon_parts, polygon_rings
 
 # The buildings that have no walls, flat on the ground without a height
@@ -149,7 +150,7 @@ def _street_level(x, y):
     return np.zeros(len(x))
 
 
-def building_groups(shapes, tags, origin, ground=_street_level):
+def building_groups(shapes, tags, origin, ground=_street_level, keep=None):
     """The buildings as the groups of a view (see the module docstring): those with a
     height in OpenStreetMap, and those drawn as high as others of their size.
 
@@ -169,6 +170,9 @@ def building_groups(shapes, tags, origin, ground=_street_level):
         lowest ground along its outline, so that no gap shows under it, to its top
         over the median ground there; a building where the ground has no height is
         left out.
+    keep : function (optional)
+        Of the outlines of the buildings in metres, those to draw (booleans), each
+        with all its parts; all by default.
 
     Returns
     -------
@@ -202,7 +206,8 @@ def building_groups(shapes, tags, origin, ground=_street_level):
             parts_of.setdefault(int(home), []).append(part)
             drawn[part] = (int(home), bottom, top)
     known, assumed, grounds = [], [], {}
-    for row in rows.tolist():
+    kept = np.ones(len(rows), dtype=bool) if keep is None else keep(shapes[rows])
+    for row in rows[np.asarray(kept, dtype=bool)].tolist():
         found = _ground_of(shapes[row], ground)
         if found is None:
             continue
@@ -280,3 +285,40 @@ def building_groups(shapes, tags, origin, ground=_street_level):
         for name, colour, edge_alpha, items in groups
         if items
     ]
+
+
+def _element(kind, found):
+    """``(kind, id)`` of an OSM element, the id a whole number as an int, so that an
+    id read as 7 and as 7.0 is one element; None without an id."""
+    if is_missing(found):
+        return None
+    if isinstance(found, (float, np.floating)) and float(found).is_integer():
+        found = int(found)
+    return (str(kind), found)
+
+
+def frame_building_groups(frames, crs, origin, ground=_street_level, keep=None):
+    """The groups of :func:`building_groups` for frames read with pyrosm, such as
+    ``osm.get_buildings()`` and the building parts of
+    ``osm.get_data_by_custom_criteria({"building:part": True})``, in the metres of
+    ``crs``. The tags of each frame are read on their own: a frame made by joining the
+    two would lose the parts' heights. An element in several frames, such as an area
+    tagged with both ``building`` and ``building:part``, counts once; a row without an
+    id counts. ``keep`` picks the buildings to draw (see :func:`building_groups`); a
+    frame that is None or empty is skipped."""
+    shapes, tags, seen = [], [], set()
+    for frame in frames:
+        if frame is None or not len(frame):
+            continue
+        types = frame.get("osm_type", ["way"] * len(frame))
+        ids = frame.get("id", [None] * len(frame))
+        keys = [_element(kind, found) for kind, found in zip(types, ids)]
+        found = frame.to_crs(crs).geometry.to_numpy()
+        for shape, tag, key in zip(found, row_tags(frame), keys):
+            if key is None or key not in seen:
+                seen.add(key)
+                shapes.append(shape)
+                tags.append(tag)
+    if not shapes:
+        return []
+    return building_groups(np.array(shapes, dtype=object), tags, origin, ground, keep)

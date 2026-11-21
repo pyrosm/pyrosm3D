@@ -26,20 +26,35 @@ class In3D:
     def _indoor_frames(self):
         """The frames of the indoor views, from the reads of the OSM object: its indoor
         elements with the walking areas, the walking network with indoor elements and
-        walking areas, and the buildings; as the arguments of
+        walking areas, and the buildings with their parts; as the arguments of
         :func:`pyrosm3d.plot_indoor`."""
         osm = self._osm
         nodes, edges = osm.get_network(
             "walking", nodes=True, indoor_elements=True, walking_areas=True
         )
         elements = osm.get_indoor_elements(walking_areas=True)
-        buildings = osm.get_buildings()
-        return dict(elements=elements, edges=edges, nodes=nodes, buildings=buildings)
+        buildings, parts = self._buildings()
+        return dict(
+            elements=elements,
+            edges=edges,
+            nodes=nodes,
+            buildings=buildings,
+            building_parts=parts,
+        )
+
+    def _buildings(self):
+        """``(buildings, parts)`` of the OSM object: ``get_buildings()`` and its
+        ``building:part`` areas (None without any)."""
+        parts = self._osm.get_data_by_custom_criteria(
+            {"building:part": True}, keep_nodes=False
+        )
+        return self._osm.get_buildings(), parts
 
     def plot_indoor(self, level=None):
         """A 3D view of the indoor elements: the floors of rooms, corridors, platforms
         and walking areas at their levels, walls with door gaps, the columns of
-        stairwells and lift shafts, and the walking network.
+        stairwells and lift shafts, and the walking network, with the buildings
+        around them in the solid model and the see-through map.
 
         Parameters
         ----------
@@ -124,6 +139,7 @@ class In3D:
         route=None,
         graph=None,
         dem=None,
+        buildings=False,
     ):
         """A 3D view of the network with its indoor elements: the edges at their levels,
         with stairs, escalators, lifts and platforms told apart.
@@ -149,6 +165,9 @@ class In3D:
         dem : str or pathlib.Path, a sequence of them, or a function (optional)
             A terrain model, as :meth:`get_network` takes it. The network is then
             drawn at heights in metres, not at its levels.
+        buildings : bool
+            Read and draw the buildings with their parts too (see
+            :func:`pyrosm3d.plot_network`).
 
         Returns
         -------
@@ -156,6 +175,8 @@ class In3D:
             The view of :func:`pyrosm3d.plot_network`.
         """
         view = dict(center=center, radius=radius, route=route, dem=dem)
+        if buildings:
+            view["buildings"], view["building_parts"] = self._buildings()
         if graph is not None:
             return plot_network(graph, **view)
         nodes, edges = self._network(network_type)

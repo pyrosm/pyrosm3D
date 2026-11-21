@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 import pytest
+import shapely
+from geopandas import GeoDataFrame
 from shapely.geometry import LineString, Point
 
 from pyrosm3d import network_heights, plot_network
@@ -223,3 +225,54 @@ def test_plot_network_keeps_edges_without_ids_apart():
     view = plot_network(edges.drop(columns="id"))
     endless = plot_network(edges, radius=float("inf")).data
     assert endless["fit"] == view.data["fit"] and endless["groups"] == view.data["groups"]
+
+
+@pytest.mark.parametrize("radius, dem", [(None, None), (60, None), (None, "slope")])
+def test_plot_network_draws_buildings(maunula_osm, radius, dem):
+    """The buildings stand on the ground with the network: on the flat ground, which
+    reaches under them, or on the terrain; with a radius only those that reach within
+    it. A building part with a height is drawn from under the ground, and the start
+    view stays that of the network."""
+    nodes, edges = maunula_osm.get_network("walking", nodes=True, indoor_elements=True)
+    buildings = maunula_osm.get_buildings()
+    outline = buildings.geometry.iloc[0]
+    part = outline.centroid.buffer(0.00003)
+    tags = {"building:part": ["yes"], "height": ["30"]}
+    parts = GeoDataFrame(tags, geometry=[part], crs=4326)
+    slope = (lambda lon, lat: (lat - 60.23) * 1e4) if dem else None
+    near = dict(center=(24.9331, 60.2311), radius=radius, dem=slope)
+    view = plot_network(edges, nodes, buildings=buildings, building_parts=parts, **near)
+    plain = plot_network(edges, nodes, **near)
+    assert (view.data["view"], view.data["fit"]) == (plain.data["view"], plain.data["fit"])
+    groups = _groups(view)
+    blocks = [
+        item
+        for group in groups.values()
+        if group["kind"] == "buildings"
+        for item in group["items"]
+    ]
+    assert blocks
+    if radius is not None:
+        whole = plot_network(edges, nodes, buildings=buildings, center=near["center"])
+        everywhere = sum(
+            len(group["items"])
+            for group in whole.data["groups"]
+            if group["kind"] == "buildings"
+        )
+        assert len(blocks) < everywhere
+        far = [shapely.Polygon(item["r"][0]).distance(shapely.Point(0, 0)) for item in blocks]
+        assert max(far) <= radius
+    if dem is None:
+        grid = view.data["groups"][0]["grid"]
+        corners = np.array([point[:2] for item in blocks for point in item["r"][0]])
+        assert (corners >= [grid["x"], grid["y"]]).all()
+        assert (corners <= [grid["x"] + grid["step"], grid["y"] + grid["step"]]).all()
+    if dem is None and radius is None:
+        (drawn_part,) = [item for item in blocks if "part" in item]
+        assert drawn_part["h"] == 30.4
+    if dem is not None:
+        assert view.data["groups"][0]["kind"] == "buildings"
+        _, south, _, north = buildings.total_bounds
+        heights = [item["g"] for item in blocks]
+        assert slope(0, south) - 0.1 <= min(heights) < max(heights)
+        assert max(heights) <= slope(0, north) + 0.1

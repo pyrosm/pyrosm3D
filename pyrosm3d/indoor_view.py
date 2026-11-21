@@ -18,6 +18,7 @@ from dataclasses import replace
 import numpy as np
 import shapely
 
+from pyrosm3d.buildings import frame_building_groups
 from pyrosm3d.columns import shaft_columns
 from pyrosm3d.floors import floor_levels, floor_openings, floors_between_levels
 from pyrosm3d.indoor import indoor_layers
@@ -435,7 +436,9 @@ def indoor_groups(view, origin, heights=level_heights):
     return [group for group in groups if group["items"]]
 
 
-def plot_indoor(elements, edges=None, nodes=None, buildings=None, level=None):
+def plot_indoor(
+    elements, edges=None, nodes=None, buildings=None, level=None, building_parts=None
+):
     """A 3D view of indoor elements (see the module docstring), from frames read with
     pyrosm (``osm`` is a ``pyrosm.OSM`` object); ``osm.in3d.plot_indoor()`` makes
     these reads itself.
@@ -450,9 +453,15 @@ def plot_indoor(elements, edges=None, nodes=None, buildings=None, level=None):
         ``osm.get_network("walking", nodes=True, indoor_elements=True,
         walking_areas=True)``, drawn on its levels.
     buildings : GeoDataFrame (optional)
-        ``osm.get_buildings()``, for the outlines.
+        ``osm.get_buildings()``: their outlines in the indoor view, and in the solid
+        model and the see-through map the buildings that reach into the view as
+        blocks and as footprints (see :mod:`pyrosm3d.buildings`).
     level : float (optional)
         The level that the indoor view opens on; by default all levels.
+    building_parts : GeoDataFrame (optional)
+        The building parts of
+        ``osm.get_data_by_custom_criteria({"building:part": True})``: a building with
+        parts is drawn by those that have a height and by what they leave of it.
 
     Returns
     -------
@@ -465,7 +474,8 @@ def plot_indoor(elements, edges=None, nodes=None, buildings=None, level=None):
         switched on in the list of layers. The solid model and the see-through map
         show the elements on a flat ground at street level.
     """
-    return layers_view(indoor_layers(elements, nodes, edges, buildings), level)
+    indoor = indoor_layers(elements, nodes, edges, buildings)
+    return layers_view(indoor, level, (buildings, building_parts))
 
 
 def _levels_of(groups):
@@ -496,13 +506,16 @@ def _points_of(groups):
     return paths
 
 
-def layers_view(indoor, level=None):
+def layers_view(indoor, level=None, building_frames=()):
     """The view of :func:`plot_indoor` for the layers ``indoor`` (an IndoorLayers, see
     :func:`pyrosm3d.indoor.indoor_layers`): the groups of :func:`indoor_groups` and
     the walking network in metres from the middle of the indoor view's box; the
     platform edges of the platforms with a floor are left out. The level picker lists
     the whole levels and those between them with floors, apart from what only doors
-    and shops are on. Raises a ValueError for a ``level`` that it does not list."""
+    and shops are on. The buildings of ``building_frames`` (see
+    :func:`pyrosm3d.buildings.frame_building_groups`) that reach into the box stand on
+    the ground of the city views; the start view is that of the indoor elements.
+    Raises a ValueError for a ``level`` that it does not list."""
     shown = IndoorBox(indoor)
     west, south, east, north = shown.box
     origin = ((west + east) / 2, (south + north) / 2)
@@ -537,6 +550,12 @@ def layers_view(indoor, level=None):
     corners = (west - origin[0], south - origin[1], east - origin[0], north - origin[1])
     paths = _points_of(groups)
     view, fit = _start_view(paths, lambda x, y: 0.0, turned=False, radius=None)
+    blocks = frame_building_groups(
+        building_frames,
+        indoor.areas.crs,
+        origin,
+        keep=lambda shapes: shapely.intersects(shapes, shown.shape),
+    )
     data = dict(
         mode="indoor",
         view=view,
@@ -553,7 +572,7 @@ def layers_view(indoor, level=None):
             background=BACKGROUND_COLOUR,
             stretch=round(indoor_stretch(shown.box, low, high), 3),
         ),
-        groups=[_flat_ground(paths)] + groups,
+        groups=[_flat_ground(paths + _points_of(blocks))] + blocks + groups,
     )
     if level is not None:
         data["indoor"]["level"] = float(level)
@@ -572,6 +591,7 @@ def to_html(
     buildings=None,
     title="Indoor elements",
     deck_gl=DECK_GL,
+    building_parts=None,
 ):
     """Write the 3D view of indoor elements as a web page, from frames read with
     pyrosm; ``osm.in3d.to_html(path)`` makes these reads itself.
@@ -597,13 +617,15 @@ def to_html(
     deck_gl : str
         Where the page loads the deck.gl library from (see
         :meth:`pyrosm3d.View.to_html`).
+    building_parts : GeoDataFrame (optional)
+        ``osm.get_data_by_custom_criteria({"building:part": True})``.
 
     Returns
     -------
     pathlib.Path
         The file written.
     """
-    view = plot_indoor(elements, edges, nodes, buildings)
+    view = plot_indoor(elements, edges, nodes, buildings, building_parts=building_parts)
     view.title = title
     return view.to_html(path, deck_gl=deck_gl)
 

@@ -15,6 +15,7 @@ from pyrosm3d.indoor_view import (
     indoor_stretch,
     layers_view,
     level_heights,
+    plot_indoor,
     to_html,
 )
 from pyrosm3d.styles import AREA_STYLES, VIEW_MARGIN
@@ -407,7 +408,7 @@ def test_to_html_writes_the_view_with_levels_and_tags(
     assert "<title>Maunula-talo &lt;3D&gt;</title>" in page
     assert '<script src="deck.min.js"' in page
     data = re.search(r'<script id="data" type="application/json">(.*?)</script>', page)
-    view = layers_view(maunula)
+    view = plot_indoor(**maunula_frames)
     assert json.loads(data[1]) == json.loads(json.dumps(view.data))
     floors = maunula.areas[maunula.areas["kind"].isin(list(AREA_STYLES))]
     counts = {
@@ -425,7 +426,7 @@ def test_to_html_writes_the_view_with_levels_and_tags(
         [str(int(level)), "Level %d · %d areas" % (level, count)]
         for level, count in counts.items()
     ]
-    item = view.data["groups"][1]["items"][0]
+    item = _groups(view)["Rooms"]["items"][0]
     key, note, tags = view.data["tables"]["elements"][item["q"]]
     assert room["info"].startswith(item["t"] + "\n\n" + note + "\n")
     assert "indoor = room" in room["info"] and note.startswith("room · level")
@@ -476,3 +477,23 @@ def test_element_notes_of_maunula_talo(maunula):
     shop = maunula.pois[maunula.pois["kind"] == "shop"].iloc[0]
     key = "%s %d" % (shop["osm_type"], shop["id"])
     assert notes[key] == "shop or amenity · level %g" % shop["levels"][0]
+
+
+def test_plot_indoor_draws_the_buildings_in_its_box(maunula, maunula_frames):
+    """The solid model and the see-through map draw the buildings that reach into the
+    box of the indoor view (what parts leave of one may lie beside it), on a ground
+    that holds them; the start views stay those of the indoor elements."""
+    view = plot_indoor(**maunula_frames)
+    plain = layers_view(maunula)
+    kinds = [group["kind"] for group in view.data["groups"]]
+    assert kinds[1:3] == ["buildings", "buildings"]
+    assert view.data["groups"][3:] == plain.data["groups"][1:]
+    assert (view.data["view"], view.data["fit"]) == (plain.data["view"], plain.data["fit"])
+    assert view.data["indoor"] == plain.data["indoor"]
+    blocks = view.data["groups"][1]["items"] + view.data["groups"][2]["items"]
+    box = shapely.box(*view.data["indoor"]["box"])
+    assert all(shapely.Polygon(item["r"][0]).distance(box) < 50 for item in blocks)
+    grid = view.data["groups"][0]["grid"]
+    corners = np.array([point[:2] for item in blocks for point in item["r"][0]])
+    assert (corners >= [grid["x"], grid["y"]]).all()
+    assert (corners <= [grid["x"] + grid["step"], grid["y"] + grid["step"]]).all()

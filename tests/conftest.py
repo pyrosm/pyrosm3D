@@ -74,7 +74,8 @@ def maunula_frames(maunula_osm):
 @pytest.fixture(scope="session")
 def maunula(maunula_frames):
     """The layers of Maunula-talo that the indoor views draw."""
-    return indoor_layers(**maunula_frames)
+    keys = ("elements", "nodes", "edges", "buildings")
+    return indoor_layers(**{key: maunula_frames[key] for key in keys})
 
 
 @pytest.fixture(scope="session")

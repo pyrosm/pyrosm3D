@@ -22,8 +22,9 @@ from collections import namedtuple
 import numpy as np
 import pandas as pd
 import shapely
-from geopandas import GeoDataFrame
+from geopandas import GeoDataFrame, GeoSeries
 
+from pyrosm3d.buildings import _street_level, frame_building_groups
 from pyrosm3d.dem import sample_dem
 from pyrosm3d.tags import (
     crosses_area,
@@ -426,9 +427,9 @@ def _network_frames(edges, nodes, center, radius, route, areas, dem):
 
 
 def _near(geometry, middle, radius):
-    """Whether ``geometry`` reaches within ``radius`` metres of the point ``middle``
-    (always without a radius)."""
-    return radius is None or geometry.distance(middle) <= radius
+    """Whether ``geometry``, a geometry or an array of them, reaches within
+    ``radius`` metres of the point ``middle`` (always without a radius)."""
+    return radius is None or shapely.distance(geometry, middle) <= radius
 
 
 def _area_lines(areas, middle, radius):
@@ -486,7 +487,15 @@ def _entrance_heights(entrances, levels, edges, dem):
 
 
 def plot_network(
-    edges, nodes=None, center=None, radius=None, route=None, areas=None, dem=None
+    edges,
+    nodes=None,
+    center=None,
+    radius=None,
+    route=None,
+    areas=None,
+    dem=None,
+    buildings=None,
+    building_parts=None,
 ):
     """A 3D view of an indoor network (see the module docstring).
 
@@ -528,6 +537,14 @@ def plot_network(
         an edge drawn on its level at its node, else on the ground. A tapped edge
         shows its heights, and an edge with a vertex where the terrain model has no
         height is left out. The edges need the columns ``u`` and ``v``.
+    buildings : GeoDataFrame (optional)
+        ``osm.get_buildings()``, drawn as blocks in the solid model and as footprints
+        in the see-through map (see :mod:`pyrosm3d.buildings`): those that reach
+        within ``radius`` of ``center``, on the terrain with ``dem``.
+    building_parts : GeoDataFrame (optional)
+        The building parts of
+        ``osm.get_data_by_custom_criteria({"building:part": True})``: a building with
+        parts is drawn by those that have a height and by what they leave of it.
 
     Returns
     -------
@@ -590,8 +607,17 @@ def plot_network(
     ]
     if not paths:  # nothing within the radius: an empty view at the center
         paths = [[[0.0, 0.0, 0.0]]]
+    blocks = frame_building_groups(
+        (buildings, building_parts),
+        crs,
+        origin,
+        _terrain(crs, dem) if in_metres else _street_level,
+        keep=None if radius is None else lambda shapes: _near(shapes, middle, radius),
+    )
+    groups = blocks + groups
     if not in_metres:
-        groups.insert(0, _flat_ground(paths))
+        footprints = [item["r"][0] for group in blocks for item in group["items"]]
+        groups.insert(0, _flat_ground(paths + footprints))
     shown = [item["p"] for item in route_groups[0]["items"]] if route_groups else paths
     ground_at = _ground_at_middle(crs, origin, dem)
     view, fit = _start_view(shown, ground_at, turned=bool(route_groups), radius=radius)
@@ -751,21 +777,29 @@ def _ground_under(metric, dem):
         return total / count
 
 
+def _terrain(crs, dem):
+    """The heights of the terrain model ``dem`` at points in the metres of ``crs``,
+    NaN where it has none, as a function ``(x, y) -> heights``."""
+
+    def heights(x, y):
+        points = GeoSeries(shapely.points(np.asarray(x), np.asarray(y)), crs=crs)
+        lonlat = points.to_crs(4326)
+        return sample_dem(lonlat.x.to_numpy(), lonlat.y.to_numpy(), dem)
+
+    return heights
+
+
 def _ground_at_middle(crs, origin, dem):
     """The height of the ground at a point ``x``, ``y`` metres from ``origin`` in
     ``crs``: from the terrain model ``dem``, 0 without one or where it has none, as a
     function ``(x, y) -> height``."""
     if dem is None:
         return lambda x, y: 0.0
+    terrain = _terrain(crs, dem)
 
     def ground(x, y):
-        point = GeoDataFrame(
-            geometry=[shapely.Point(origin[0] + x, origin[1] + y)], crs=crs
-        ).to_crs(4326)
-        height = sample_dem(
-            point.geometry.x.to_numpy(), point.geometry.y.to_numpy(), dem
-        )
-        return float(height[0]) if np.isfinite(height[0]) else 0.0
+        height = terrain([origin[0] + x], [origin[1] + y])[0]
+        return float(height) if np.isfinite(height) else 0.0
 
     return ground
 

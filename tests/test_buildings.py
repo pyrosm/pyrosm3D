@@ -1,9 +1,15 @@
 import numpy as np
 import pytest
 import shapely
+from geopandas import GeoDataFrame
 
 from pyrosm3d import View
-from pyrosm3d.buildings import _level_count, _metres, building_groups
+from pyrosm3d.buildings import (
+    _level_count,
+    _metres,
+    building_groups,
+    frame_building_groups,
+)
 
 KNOWN = "Buildings"
 ASSUMED = "Buildings without a height (as high as others of their size)"
@@ -236,3 +242,50 @@ def test_the_page_draws_buildings_solid_and_as_footprints(tmp_path, run_view):
     assert {point[2] for point in footprint} == {3.0}
     assert through["footprints-Buildings"]["parameters"] == {"depthMask": False}
     assert indoor["at"] == []
+
+
+def test_frames_count_an_element_once():
+    """An element that two reads both return, as an area tagged with both building
+    and building:part, is drawn once, also when one read gives its id as 7 and the
+    other as 7.0; rows without an id each count, also in a frame whose other rows
+    have one."""
+    both = dict(id=[7, None], osm_type=["way", "way"], building=["university", "yes"])
+    both["building:part"] = ["yes", None]
+    both["building:levels"] = ["2", "2"]
+    square = shapely.box(24.0, 60.0, 24.0002, 60.0001)
+    beside = shapely.box(24.001, 60.0, 24.0012, 60.0001)
+    one = GeoDataFrame(both, geometry=[square, beside], crs=4326)  # ids 7.0, NaN
+    whole = one.iloc[:1].astype({"id": int})  # the id 7 as an integer
+    loose = GeoDataFrame({"building": ["yes", "yes"]}, geometry=[square] * 2, crs=4326)
+    crs = one.estimate_utm_crs()
+    origin = one.to_crs(crs).geometry.iloc[0].centroid.coords[0]
+    groups = frame_building_groups((one, one, whole, loose), crs, origin)
+    assert [len(group["items"]) for group in groups] == [3, 2]
+
+
+def test_keep_picks_whole_buildings_with_their_parts():
+    """The buildings to draw are picked whole: a building that reaches into what is
+    kept brings all its parts, also those outside it, and what they leave of it; a
+    building outside brings none of its parts."""
+    shapes = [
+        _square(0, 0, 20),
+        shapely.box(0, 0, 8, 20),
+        shapely.box(12, 0, 20, 20),
+        _square(100, 0, 10),
+        _square(100, 0, 5),
+    ]
+    tags = [
+        {"building": "yes", "building:levels": "1"},
+        {"building:part": "yes", "height": "30"},
+        {"building:part": "yes", "height": "20"},
+        {"building": "yes", "building:levels": "1"},
+        {"building:part": "yes", "height": "10"},
+    ]
+    near = shapely.box(-5, -5, 5, 25)
+    groups = building_groups(
+        np.array(shapes), tags, (0.0, 0.0), keep=lambda found: shapely.intersects(found, near)
+    )
+    known = _blocks(groups, KNOWN)
+    assert sorted(item["h"] for item in known if "part" in item) == [20.4, 30.4]
+    (rest,) = [item for item in known if "part" not in item]
+    assert _area(rest) == pytest.approx(80.0, abs=1.0)

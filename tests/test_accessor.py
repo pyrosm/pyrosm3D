@@ -2,7 +2,12 @@ import networkx as nx
 import pytest
 
 from pyrosm3d import In3D, network_heights, plot_network
-from pyrosm3d.indoor_view import layers_view
+from pyrosm3d import plot_indoor
+
+
+def _names(view):
+    """The names of the groups of a view."""
+    return [group["name"] for group in view.data["groups"]]
 
 
 def _slope(longitudes, latitudes):
@@ -11,15 +16,14 @@ def _slope(longitudes, latitudes):
 
 
 
-def test_in3d_draws_the_indoor_elements_of_its_osm_object(
-    maunula_osm, maunula, tmp_path
-):
+def test_in3d_draws_the_indoor_elements_of_its_osm_object(maunula_osm, tmp_path):
     """The accessor reads the layers of its OSM object and draws them as plot_indoor
     and to_html do: all levels, one level, and the web page with a button for each
     level."""
     in3d = In3D(maunula_osm)
-    assert in3d.plot_indoor().data == layers_view(maunula).data
-    assert in3d.plot_indoor(level=1).data == layers_view(maunula, level=1).data
+    frames = in3d._indoor_frames()
+    assert in3d.plot_indoor().data == plot_indoor(**frames).data
+    assert in3d.plot_indoor(level=1).data == plot_indoor(**frames, level=1).data
 
     path = in3d.to_html(tmp_path / "maunula.html", title="Maunula-talo")
     page = path.read_text(encoding="utf-8")
@@ -41,6 +45,12 @@ def test_in3d_draws_the_network_of_its_osm_object(maunula_osm, dem):
         view = in3d.plot_network(network_type, **near)
         assert view.data == plot_network(edges, nodes, **near).data
         assert "Stairs" in {group["name"] for group in view.data["groups"]}
+    buildings, parts = in3d._buildings()
+    drawn = in3d.plot_network("all", buildings=True, **near)
+    expected = plot_network(
+        edges, nodes, buildings=buildings, building_parts=parts, **near
+    )
+    assert drawn.data == expected.data and "Buildings" in _names(drawn)
 
     graph = maunula_osm.get_graph(
         "walking", graph_type="networkx", indoor_elements=True
