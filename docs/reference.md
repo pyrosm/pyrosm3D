@@ -21,19 +21,13 @@ The functions draw frames that were read with pyrosm, also after you have change
 .. autofunction:: pyrosm3d.plot_network
 ```
 
-## Views and figures
+## Views
 
-`plot_network` returns a deck.gl view of this class.
+`plot_indoor` and `plot_network` return a deck.gl view of this class.
 
 ```{eval-rst}
 .. autoclass:: pyrosm3d.View
    :members: to_html, show
-```
-
-`plot_indoor` returns a plotly figure of this class.
-
-```{eval-rst}
-.. autoclass:: pyrosm3d.touch.TouchFigure
 ```
 
 ## Heights in metres

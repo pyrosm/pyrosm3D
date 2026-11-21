@@ -21,12 +21,10 @@ def test_in3d_draws_the_indoor_elements_of_its_osm_object(
     assert in3d.plot_indoor().data == layers_view(maunula).data
     assert in3d.plot_indoor(level=1).data == layers_view(maunula, level=1).data
 
-    path = in3d.to_html(
-        tmp_path / "maunula.html", title="Maunula-talo", include_plotlyjs="cdn"
-    )
+    path = in3d.to_html(tmp_path / "maunula.html", title="Maunula-talo")
     page = path.read_text(encoding="utf-8")
     assert path == tmp_path / "maunula.html" and "<title>Maunula-talo</title>" in page
-    assert '"levels": [0.0, 1.0, 2.0]' in page
+    assert '"levels":[[0.0,0.0,7],' in page
 
 
 @pytest.mark.parametrize("dem", [None, _slope])

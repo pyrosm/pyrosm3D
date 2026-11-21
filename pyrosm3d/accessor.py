@@ -1,9 +1,9 @@
 """The ``in3d`` accessor of ``pyrosm.OSM``: 3D views of what an OSM object reads."""
 
 from pyrosm3d.heights import network_heights
-from pyrosm3d.indoor_view import plot_indoor
+from pyrosm3d.indoor_view import plot_indoor, to_html
 from pyrosm3d.network import plot_network
-from pyrosm3d.page import to_html
+from pyrosm3d.view import DECK_GL
 
 
 class In3D:
@@ -53,9 +53,10 @@ class In3D:
         """
         return plot_indoor(**self._indoor_frames(), level=level)
 
-    def to_html(self, path, title="Indoor elements", include_plotlyjs=True):
-        """Write a web page with a plotly figure of the indoor elements in 3D, a
-        button for each level and the OpenStreetMap tags of a clicked element.
+    def to_html(self, path, title="Indoor elements", deck_gl=DECK_GL):
+        """Write the 3D view of the indoor elements of :meth:`plot_indoor` as a web
+        page, in which the level picker names the number of areas on each level and a
+        tapped element shows its OpenStreetMap tags.
 
         Parameters
         ----------
@@ -63,22 +64,16 @@ class In3D:
             The HTML file to write.
         title : str
             The title of the page.
-        include_plotlyjs : bool or "cdn"
-            With True (the default) the page holds plotly's JavaScript, so it works
-            without a network connection and is about 5 MB larger. With ``"cdn"`` the
-            page loads the library from plotly's content delivery network.
+        deck_gl : str
+            Where the page loads the deck.gl library from (see
+            :meth:`pyrosm3d.View.to_html`).
 
         Returns
         -------
         pathlib.Path
             The file written, as :func:`pyrosm3d.to_html` writes it.
         """
-        return to_html(
-            path=path,
-            title=title,
-            include_plotlyjs=include_plotlyjs,
-            **self._indoor_frames(),
-        )
+        return to_html(path=path, title=title, deck_gl=deck_gl, **self._indoor_frames())
 
     def _network(self, network_type, **read_options):
         """The nodes and edges of ``get_network(network_type, nodes=True,

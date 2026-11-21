@@ -1,3 +1,5 @@
+import json
+import re
 from dataclasses import replace
 
 import numpy as np
@@ -8,10 +10,12 @@ from pyrosm3d.columns import shaft_columns
 from pyrosm3d.floors import floor_levels, floor_openings
 from pyrosm3d.indoor_view import (
     IndoorBox,
+    element_notes,
     indoor_groups,
     indoor_stretch,
     layers_view,
     level_heights,
+    to_html,
 )
 from pyrosm3d.styles import AREA_STYLES, VIEW_MARGIN
 from pyrosm3d.tags import crosses_area, element_keys
@@ -214,7 +218,7 @@ def test_plot_indoor_draws_maunula_talo(maunula):
     indoor = data["indoor"]
     assert data["mode"] == "indoor" and "level" not in indoor
     assert indoor["box"][0] == pytest.approx(-half, abs=0.1) and indoor["ground"] == 0
-    assert indoor["levels"] == [[0.0, 0.0], [1.0, 4.0], [2.0, 8.0]]
+    assert [entry[:2] for entry in indoor["levels"]] == [[0, 0], [1, 4], [2, 8]]
     assert indoor["stretch"] == 2.2 and indoor["background"] == "#ffffff"
     assert data["groups"][0]["name"] == "Ground"
     square = areas[areas["id"] == 1250318665].geometry.iloc[0]
@@ -258,7 +262,7 @@ def test_plot_indoor_opens_on_a_level(maunula, tmp_path, run_view):
     view = layers_view(replace(maunula, doors=doors, edges=edges), level=1)
     groups = _groups(view)
     assert view.data["indoor"]["level"] == 1.0
-    assert [level for level, _ in view.data["indoor"]["levels"]] == [0.0, 1.0, 2.0]
+    assert [level for level, *_ in view.data["indoor"]["levels"]] == [0.0, 1.0, 2.0]
     assert _on_levels(groups["Doors and entrances"]) == {1.0: 1}
     half = [
         item
@@ -316,7 +320,7 @@ def test_plot_indoor_draws_a_floor_between_two_levels(maunula):
     edges.loc[edge, ["u_level", "v_level"]] = 0.5
     view = layers_view(replace(maunula, areas=areas, doors=doors, edges=edges), 0.5)
     groups = _groups(view)
-    assert [level for level, _ in view.data["indoor"]["levels"]] == [0, 0.5, 1, 2]
+    assert [level for level, *_ in view.data["indoor"]["levels"]] == [0, 0.5, 1, 2]
     on_half = {
         name for name, group in groups.items() if 0.5 in _on_levels(group)
     }
@@ -384,3 +388,91 @@ def test_plot_indoor_without_areas(maunula):
         layers_view(replace(maunula, walls=far), level=7)
     with pytest.raises(ValueError, match="no areas and no network"):
         layers_view(replace(no_areas, edges=maunula.edges.iloc[:0]))
+
+
+def test_to_html_writes_the_view_with_levels_and_tags(
+    maunula, maunula_frames, tmp_path, run_view
+):
+    """The page of to_html is the view of plot_indoor under its title, with the
+    deck.gl library from where it is asked. The level picker names the number of areas
+    on each level, a tap on a room shows what it is, its tags and a link to it, and a
+    tap on an item of no element shows its own text only."""
+    path = to_html(
+        path=tmp_path / "maunula.html",
+        title="Maunula-talo <3D>",
+        deck_gl="deck.min.js",
+        **maunula_frames,
+    )
+    page = path.read_text(encoding="utf-8")
+    assert "<title>Maunula-talo &lt;3D&gt;</title>" in page
+    assert '<script src="deck.min.js"' in page
+    data = re.search(r'<script id="data" type="application/json">(.*?)</script>', page)
+    view = layers_view(maunula)
+    assert json.loads(data[1]) == json.loads(json.dumps(view.data))
+    floors = maunula.areas[maunula.areas["kind"].isin(list(AREA_STYLES))]
+    counts = {
+        level: sum(level in levels for levels in floors["levels"])
+        for level in (0.0, 1.0, 2.0)
+    }
+    assert counts[0.0] == 7  # four platforms, the two squares and the lift
+    steps = [
+        ["click", "floors-Rooms", 0],
+        ["toggle", "Level floors"],
+        ["click", "floors-Level floors", 0],
+    ]
+    start, room, _, level_floor = run_view(view, steps, tmp_path)
+    assert start["controls"]["levelChoices"] == [["", "All levels"]] + [
+        [str(int(level)), "Level %d · %d areas" % (level, count)]
+        for level, count in counts.items()
+    ]
+    item = view.data["groups"][1]["items"][0]
+    key, note, tags = view.data["tables"]["elements"][item["q"]]
+    assert room["info"].startswith(item["t"] + "\n\n" + note + "\n")
+    assert "indoor = room" in room["info"] and note.startswith("room · level")
+    assert tags["indoor"] == "room"
+    assert room["links"] == ["https://www.openstreetmap.org/" + key.replace(" ", "/")]
+    assert level_floor["info"] == "Floor of level 0" and level_floor["links"] == []
+
+
+def test_level_counts_leave_out_areas_outside_the_view(maunula):
+    """The number of areas on a level holds the areas that the view draws: a walking
+    area that lies outside the view of the other areas, or only touches its edge, is
+    not counted and has no floor."""
+    areas = maunula.areas
+    is_square = areas["id"] == 674689752
+    _, south, east, _ = IndoorBox(maunula).box
+    beside_the_view = shapely.box(east, south, east + 10, south + 10)
+    moved = {
+        "near": areas.geometry,
+        "far": areas.geometry.where(~is_square, areas.translate(5000)),
+        "touching": areas.geometry.where(~is_square, beside_the_view),
+    }
+    counts, floors = {}, {}
+    for name, geometry in moved.items():
+        view = layers_view(replace(maunula, areas=areas.assign(geometry=geometry)))
+        levels = view.data["indoor"]["levels"]
+        counts[name] = {level: count for level, _, count in levels}
+        floors[name] = len(_groups(view)["Walking areas"]["items"])
+    assert counts["near"][0.0] == 7
+    assert counts["far"] == counts["touching"] == {**counts["near"], 0.0: 6}
+    assert floors["far"] == floors["touching"] == floors["near"] - 1
+
+
+def test_element_notes_of_maunula_talo(maunula):
+    """The note of an element says what it is and its levels: an area by its kind (a
+    platform area also for the edges of its outline), an edge of the network by its
+    kind and the levels of its ends, a door and a shop or amenity by their levels."""
+    notes = element_notes(maunula)
+    assert notes["way 1568797319"] == "stairwell, lift or storage · levels 0, 1, 2"
+    assert notes["way 536922648"] == "platform area · level 0"
+    assert notes["way 1576010635"] == "wall · level 2"
+    assert notes["way 674689746"] == "stairs · level 0"
+    assert notes["way 26131689"] == "walkway · level 0"
+    doors = maunula.doors
+    on_first = doors[doors["levels"].map(lambda levels: levels == (1.0,))]
+    assert notes["node %d" % on_first["id"].iloc[0]] == "door or entrance · level 1"
+    unlevelled = doors[doors["levels"].map(len) == 0]
+    assert notes["node %d" % unlevelled["id"].iloc[0]] == "door or entrance · no level"
+    shop = maunula.pois[maunula.pois["kind"] == "shop"].iloc[0]
+    key = "%s %d" % (shop["osm_type"], shop["id"])
+    assert notes[key] == "shop or amenity · level %g" % shop["levels"][0]

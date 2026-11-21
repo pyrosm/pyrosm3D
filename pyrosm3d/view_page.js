@@ -161,6 +161,9 @@
         const text = view.textOf(picked.object, data.tables);
         info.hidden = !text;
         info.textContent = text;
+        if (text && picked.object.q !== undefined) {
+          showElement(data.tables.elements[picked.object.q]);
+        }
       },
       onError: (error) => report(error && error.message ? error.message : String(error)),
       onResize: (size) => resized(size.height),
@@ -168,6 +171,20 @@
 
     // a drag with the right mouse button turns the view: no menu of the browser then
     canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+
+    // Under the text of a tapped item: what its element is, the element's
+    // OpenStreetMap tags and a link to it ([key, note, tags], key such as "way 123")
+    function showElement([key, note, tags]) {
+      const lines = [note].concat(Object.keys(tags).sort().map((name) => name + " = " + tags[name]));
+      info.textContent += "\n\n" + lines.join("\n") + "\n";
+      const [type, id] = key.split(" ");
+      const link = document.createElement("a");
+      link.href = "https://www.openstreetmap.org/" + type + "/" + id;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = key;
+      info.appendChild(link);
+    }
 
     function show() {
       instance.setProps({ viewState: state });
@@ -371,9 +388,12 @@
     Object.keys(viewButtons).forEach((name) => {
       viewButtons[name].addEventListener("click", () => setMode(name));
     });
+    // a level of the indoor view in the picker, with the number of areas on it
+    const levelName = ([number, , areas]) =>
+      "Level " + number + (areas === undefined ? "" : " · " + areas + (areas === 1 ? " area" : " areas"));
     if (data.indoor) {
       [["", "All levels"]]
-        .concat(data.indoor.levels.map((entry) => [String(entry[0]), "Level " + entry[0]]))
+        .concat(data.indoor.levels.map((entry) => [String(entry[0]), levelName(entry)]))
         .forEach((choice) => {
           const option = document.createElement("option");
           option.value = choice[0];

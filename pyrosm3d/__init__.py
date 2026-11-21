@@ -4,9 +4,8 @@ from importlib.metadata import PackageNotFoundError, version
 
 from pyrosm3d.accessor import In3D
 from pyrosm3d.heights import network_heights
-from pyrosm3d.indoor_view import plot_indoor
+from pyrosm3d.indoor_view import plot_indoor, to_html
 from pyrosm3d.network import plot_network
-from pyrosm3d.page import to_html
 from pyrosm3d.view import View
 
 try:

@@ -16,7 +16,9 @@ The data of a view is a dict that the page script reads:
     indoor view (``plot``: colour, width in pixels and dash) is on there at the start.
 ``tables``
     The texts that the items of the network refer to by number: ``names`` and
-    ``highways``.
+    ``highways``; and the ``elements`` that items refer to by number (``q``), each
+    ``[key, note, tags]``: a key such as ``"way 123"``, what the element is and its
+    OpenStreetMap tags, which a tap on an item shows with a link to the element.
 ``view``
     Where the camera starts: deck.gl's view state of an orbit view (``target``,
     ``rotationX``, ``rotationOrbit``, ``zoom``) and its limits (``minZoom``,
@@ -33,7 +35,8 @@ The data of a view is a dict that the page script reads:
     ground; the floors are plates, and the heights are drawn taller).
 ``indoor``
     On a page with indoor elements: the ``box`` of the indoor view, its ``levels``
-    (each a level and its height), the height of the ``ground``, its ``background``
+    (each a level, its height and the number of areas on it), the height of the
+    ``ground``, its ``background``
     colour, how much taller than to scale it draws the heights (``stretch``) and,
     optionally, the ``level`` that it opens on.
 """

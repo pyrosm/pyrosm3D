@@ -9,7 +9,8 @@ shafts as see-through columns; doors and shops as points, off at the start. The
 indoor view alone also draws the outlines of levels and of buildings, and the outer
 walls, a full storey high along those outlines, over the floors of their levels, both
 off at the start. Each item on one level carries it (``l``), for the level picker of
-the indoor view; a column through several floors has none.
+the indoor view; a column through several floors has none. An item of an element
+carries the element's key (``q``, such as ``"way 123"``), for what a tap on it shows.
 """
 
 from dataclasses import replace
@@ -21,11 +22,13 @@ from pyrosm3d.columns import shaft_columns
 from pyrosm3d.floors import floor_levels, floor_openings, floors_between_levels
 from pyrosm3d.indoor import indoor_layers
 from pyrosm3d.network import (
+    EDGE_NAMES,
     _edge_kinds,
     _edge_points,
     _flat_ground,
     _NetworkLines,
     _start_view,
+    end_levels_text,
 )
 from pyrosm3d.styles import (
     AREA_STYLES,
@@ -45,8 +48,8 @@ from pyrosm3d.styles import (
     WALL_STYLE,
     metres_of_levels,
 )
-from pyrosm3d.tags import element_keys
-from pyrosm3d.view import View
+from pyrosm3d.tags import element_keys, row_tags
+from pyrosm3d.view import DECK_GL, View
 from pyrosm3d.walls import building_outlines, inner_walls, outer_walls
 
 # Metres that a wall is thick
@@ -103,12 +106,6 @@ def _view_box(indoor):
         east + VIEW_MARGIN,
         north + VIEW_MARGIN,
     )
-
-
-def areas_in_view(indoor):
-    """The areas of ``indoor`` (an IndoorLayers) that its indoor view draws: those with
-    a part inside its box (see :func:`_view_box`, :func:`_areas_inside`)."""
-    return _areas_inside(indoor.areas, shapely.box(*_view_box(indoor)))
 
 
 def _areas_inside(areas, view):
@@ -238,7 +235,7 @@ def _floor_groups(view, heights, origin):
             text = "\n".join(filter(None, what))
             z = heights(spot.x, spot.y, level) - _FLOOR_DROP
             items[kind] += [
-                {"r": rings, "k": kind, "t": text, "l": float(level)}
+                {"r": rings, "k": kind, "t": text, "l": float(level), "q": key}
                 for rings in _rings(floor, z, origin)
             ]
     return [
@@ -318,7 +315,7 @@ def _column_groups(indoor, heights, origin):
                 levels_text(levels),
             )
             items += [
-                {"r": rings, "h": round(high - low, 2), "t": text}
+                {"r": rings, "h": round(high - low, 2), "t": text, "q": key}
                 for rings in _rings(outline, low, origin)
             ]
         groups.append(
@@ -353,6 +350,7 @@ def _point_group(points, style, lift, between, heights, origin):
                         "c": [round(value, 2) for value in place],
                         "t": "%s\n%s · level %g" % (label, key, level),
                         "l": float(level),
+                        "q": key,
                     }
                 )
     width = 3.0 if style is DOOR_STYLE else 3.5
@@ -551,6 +549,9 @@ def layers_view(indoor, level=None):
     )
     if level is not None and float(level) not in picked:
         raise ValueError("plot_indoor got nothing to draw on level %g." % level)
+    areas = shown.indoor.areas
+    floors = areas[areas["kind"].isin(list(AREA_STYLES))]["levels"]
+    counts = {found: sum(found in on for on in floors) for found in picked}
     every = sorted(_levels_of(groups))
     low, high = (level_heights(0.0, 0.0, found) for found in (every[0], every[-1]))
     corners = (west - origin[0], south - origin[1], east - origin[0], north - origin[1])
@@ -561,10 +562,13 @@ def layers_view(indoor, level=None):
         view=view,
         fit=fit,
         stretch=HEIGHT_STRETCH,
-        tables=lines.tables(),
+        tables=dict(lines.tables(), elements=_element_table(indoor, groups)),
         indoor=dict(
             box=[round(value, 1) for value in corners],
-            levels=[[found, level_heights(0.0, 0.0, found)] for found in picked],
+            levels=[
+                [found, level_heights(0.0, 0.0, found), counts[found]]
+                for found in picked
+            ],
             ground=0.0,
             background=BACKGROUND_COLOUR,
             stretch=round(indoor_stretch(shown.box, low, high), 3),
@@ -578,3 +582,100 @@ def layers_view(indoor, level=None):
         "walls, stairwells and lift shafts, and the walking network."
     )
     return View(data, title="Indoor elements", about=about)
+
+
+def to_html(
+    elements,
+    path,
+    edges=None,
+    nodes=None,
+    buildings=None,
+    title="Indoor elements",
+    deck_gl=DECK_GL,
+):
+    """Write the 3D view of indoor elements as a web page, from frames read with
+    pyrosm; ``osm.in3d.to_html(path)`` makes these reads itself.
+
+    The page is that of :func:`plot_indoor`: the level picker names the number of
+    areas on each level, and a tap on an area, a line of the network, a door, a shop
+    or a stairwell or lift column says what the element is, lists its OpenStreetMap
+    tags and links to it.
+
+    Parameters
+    ----------
+    elements : GeoDataFrame
+        ``osm.get_indoor_elements(walking_areas=True)``.
+    path : str or pathlib.Path
+        The HTML file to write.
+    edges, nodes : GeoDataFrame (optional)
+        ``osm.get_network("walking", nodes=True, indoor_elements=True,
+        walking_areas=True)``.
+    buildings : GeoDataFrame (optional)
+        ``osm.get_buildings()``.
+    title : str
+        The title of the page.
+    deck_gl : str
+        Where the page loads the deck.gl library from (see
+        :meth:`pyrosm3d.View.to_html`).
+
+    Returns
+    -------
+    pathlib.Path
+        The file written.
+    """
+    view = plot_indoor(elements, edges, nodes, buildings)
+    view.title = title
+    return view.to_html(path, deck_gl=deck_gl)
+
+
+def element_notes(indoor):
+    """``{key: note}`` of the elements of ``indoor`` (an IndoorLayers): what an element
+    is and the levels it is on, such as ``"room · levels 1, 2"`` or ``"stairs · levels
+    0 → 1"`` (the lowest and the highest level of the element's edges). An area's note
+    stands also for the edges that carry its key."""
+    notes, ends = {}, {}
+    kinds = zip(element_keys(indoor.edges), _edge_kinds(indoor.edges))
+    for key, (_, _, kind, level_u, level_v) in kinds:
+        low, high = sorted((level_u, level_v))
+        _, lowest, highest = ends.get(key, (kind, low, high))
+        ends[key] = (kind, min(low, lowest), max(high, highest))
+    for key, (kind, low, high) in ends.items():
+        notes[key] = "%s · %s" % (EDGE_NAMES[kind], end_levels_text(low, high))
+    areas = indoor.areas
+    columns = (areas["kind"], areas["levels"])
+    for key, kind, levels in zip(element_keys(areas), *columns):
+        name = AREA_STYLES[kind][2] if kind in AREA_STYLES else kind
+        notes[key] = "%s · %s" % (name, levels_text(levels))
+    for layer, style in ((indoor.doors, DOOR_STYLE), (indoor.pois, POI_STYLE)):
+        for key, levels in zip(element_keys(layer), layer["levels"]):
+            notes[key] = "%s · %s" % (style[3], levels_text(levels))
+    return notes
+
+
+def _element_table(indoor, groups):
+    """The elements that the items of ``groups`` belong to, as ``[key, note, tags]``
+    (see :func:`element_notes`), in the order in which the items first name them: an
+    item's own key (``q``), or the way, relation or node of a line of the network.
+    Each item's ``q`` becomes the number of its element in the table; an element
+    without tags is not listed."""
+    tags = dict(zip(element_keys(indoor.edges), row_tags(indoor.edges)))
+    for layer in (indoor.areas, indoor.doors, indoor.pois):
+        tags.update(zip(element_keys(layer), layer["tags"]))
+    notes = element_notes(indoor)
+    table, numbers = [], {}
+    for group in groups:
+        for item in group.get("items", []):
+            key = item.pop("q", None)
+            if key is None and "w" in item:
+                key = "%s %s" % (
+                    ("way", "relation", "node")[item.get("e", 0)],
+                    item["w"],
+                )
+            if not tags.get(key):
+                continue
+            if key not in numbers:
+                numbers[key] = len(table)
+                listed = {name: str(value) for name, value in tags[key].items()}
+                table.append([key, notes.get(key, ""), listed])
+            item["q"] = numbers[key]
+    return table

@@ -46,8 +46,6 @@ include = ["pyrosm3d*"]
 [tool.setuptools.package-data]
 pyrosm3d = [
     "figure.js",
-    "page.html",
-    "page.js",
     "touch.js",
     "view.html",
     "view_camera.js",

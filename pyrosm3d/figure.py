@@ -87,8 +87,7 @@ def _lines(trace, name, colour, width, dash):
 
 def layers_figure(indoor):
     """The plotly figure of the layers ``indoor`` (an IndoorLayers, see
-    :func:`pyrosm3d.indoor.indoor_layers`) that the web page of
-    :func:`pyrosm3d.to_html` shows (see the module docstring)."""
+    :func:`pyrosm3d.indoor.indoor_layers`), see the module docstring."""
     shown = IndoorBox(indoor)
     box, view, indoor = shown.box, shown.shape, shown.indoor
     origin = ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
@@ -374,31 +373,6 @@ def _marker_traces(points, style, lift, origin, between=()):
         )
         for level, (x, y, text, keys) in sorted(by_level.items())
     ]
-
-
-def level_views(figure):
-    """``{level: scene}`` for each whole level of ``figure``, a figure of
-    :func:`layers_figure`, and each level between two floors that an area has its
-    floor on: the range and the ticks of the vertical axis and the aspect ratio of the
-    scene of what is on that level alone, as plotly's ``relayout`` takes them."""
-    scene = figure.layout.scene
-    (west, east), (south, north) = scene.xaxis.range, scene.yaxis.range
-    on_levels = [trace.meta["levels"] for trace in figure.data]
-    whole = {lv for levels in on_levels for lv in levels if float(lv).is_integer()}
-    floor_names = {name for name, _, _ in AREA_STYLES.values()}
-    floors = [trace for trace in figure.data if trace.legendgroup in floor_names]
-    between = {lv for trace in floors for lv in trace.meta["levels"]} - whole
-    views = {}
-    for level in sorted(whole | between):
-        shown = sorted({lv for levels in on_levels if level in levels for lv in levels})
-        scene = _layout((west, south, east, north), shown, between)["scene"]
-        views[level] = {
-            "scene.zaxis.range": scene["zaxis"]["range"],
-            "scene.zaxis.tickvals": scene["zaxis"]["tickvals"],
-            "scene.zaxis.ticktext": scene["zaxis"]["ticktext"],
-            "scene.aspectratio": scene["aspectratio"],
-        }
-    return views
 
 
 def _layout(box, levels, between=()):
