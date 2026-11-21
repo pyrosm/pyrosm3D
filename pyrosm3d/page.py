@@ -9,8 +9,9 @@ from string import Template
 
 import plotly.io
 
-from pyrosm3d.figure import areas_in_view, layers_figure, level_views
+from pyrosm3d.figure import layers_figure, level_views
 from pyrosm3d.indoor import indoor_layers
+from pyrosm3d.indoor_view import areas_in_view, levels_text
 from pyrosm3d.network import EDGE_NAMES, _edge_kinds, end_levels_text
 from pyrosm3d.styles import AREA_STYLES, DOOR_STYLE, POI_STYLE
 from pyrosm3d.tags import element_keys, row_tags
@@ -138,17 +139,8 @@ def _element_notes(indoor):
     columns = (areas["kind"], areas["levels"])
     for key, kind, levels in zip(element_keys(areas), *columns):
         name = AREA_STYLES[kind][2] if kind in AREA_STYLES else kind
-        notes[key] = "%s · %s" % (name, _levels_text(levels))
+        notes[key] = "%s · %s" % (name, levels_text(levels))
     for layer, style in ((indoor.doors, DOOR_STYLE), (indoor.pois, POI_STYLE)):
         for key, levels in zip(element_keys(layer), layer["levels"]):
-            notes[key] = "%s · %s" % (style[3], _levels_text(levels))
+            notes[key] = "%s · %s" % (style[3], levels_text(levels))
     return notes
-
-
-def _levels_text(levels):
-    """``"level 1"``, ``"levels 1, 2"`` or ``"no level"`` for the ``levels`` of an
-    element."""
-    if not levels:
-        return "no level"
-    listed = ", ".join("%g" % level for level in levels)
-    return ("level %s" if len(levels) == 1 else "levels %s") % listed

@@ -11,21 +11,14 @@ floors that they join. Every trace is shown on the levels in its ``meta["levels"
 a column has none and is drawn only with all levels.
 """
 
-import math
-from dataclasses import replace
-
 import numpy as np
 import plotly.graph_objects as go
 import shapely
 
 from pyrosm3d.columns import shaft_columns
-from pyrosm3d.floors import (
-    floor_levels,
-    floor_openings,
-    floors_between_levels,
-    triangles,
-)
+from pyrosm3d.floors import floor_levels, floor_openings, triangles
 from pyrosm3d.indoor import indoor_layers
+from pyrosm3d.indoor_view import IndoorBox, _inside, shown_levels
 from pyrosm3d.network import _STYLES, _edge_kinds, _edge_text, _line_points
 from pyrosm3d.styles import (
     AREA_STYLES,
@@ -42,7 +35,6 @@ from pyrosm3d.styles import (
     OUTER_WALL_NAME,
     OUTLINE_COLOUR,
     POI_STYLE,
-    VIEW_MARGIN,
     WALL_HEIGHT,
     WALL_NAME,
     WALL_STYLE,
@@ -127,20 +119,11 @@ def plot_indoor(elements, edges=None, nodes=None, buildings=None, level=None):
 def layers_figure(indoor, level=None):
     """The figure of :func:`plot_indoor` for the layers ``indoor`` (an IndoorLayers,
     see :func:`pyrosm3d.indoor.indoor_layers`)."""
-    box = _view_box(indoor)
-    view = shapely.box(*box)
+    shown = IndoorBox(indoor)
+    box, view, indoor = shown.box, shown.shape, shown.indoor
     origin = ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
-    indoor = replace(
-        indoor,
-        areas=_areas_inside(indoor.areas, view),
-        walls=indoor.walls[indoor.walls.intersects(view)],
-        doors=indoor.doors[indoor.doors.within(view)],
-        pois=indoor.pois[indoor.pois.within(view)],
-        edges=indoor.edges[indoor.edges.intersects(view)],
-    )
     outer, level_floors = outer_walls(indoor, view)
-    between = floors_between_levels(indoor.areas)
-    platform_floors = _platform_floors(indoor.areas, view)
+    between, platform_floors = shown.between, shown.platform_floors
     traces = (
         _floor_traces(indoor.areas, floor_openings(indoor.edges), origin, view)
         + _outline_traces(indoor.areas, origin, view)
@@ -166,48 +149,6 @@ def layers_figure(indoor, level=None):
         in_legend.add(trace.legendgroup)
     levels = sorted({float(lv) for trace in traces for lv in trace.meta["levels"]})
     return TouchFigure(traces, _layout(box, levels, between))
-
-
-def _view_box(indoor):
-    """``(west, south, east, north)`` of the view: the bounds of the areas other than
-    walking areas, of the walking areas where there are no others, or of the network
-    where there are no areas, with a margin."""
-    areas = indoor.areas
-    frames = (areas[areas["kind"] != "walking_area"], areas, indoor.edges)
-    frame = next((frame for frame in frames if len(frame)), None)
-    if frame is None:
-        raise ValueError("plot_indoor got no areas and no network to draw.")
-    west, south, east, north = frame.total_bounds
-    return (
-        west - VIEW_MARGIN,
-        south - VIEW_MARGIN,
-        east + VIEW_MARGIN,
-        north + VIEW_MARGIN,
-    )
-
-
-def areas_in_view(indoor):
-    """The areas of ``indoor`` (an IndoorLayers) that its figure draws: those with a
-    part inside its view (see :func:`_view_box`, :func:`_areas_inside`)."""
-    return _areas_inside(indoor.areas, shapely.box(*_view_box(indoor)))
-
-
-def _areas_inside(areas, view):
-    """The rows of ``areas`` with a part inside the box ``view`` (see
-    :func:`_inside`). A walking area that lies outside the view of the other areas,
-    or only touches it, is left out: it has no floor and no outline in the figure."""
-    in_view = [bool(_inside(shape, view)) for shape in areas.geometry]
-    return areas[np.array(in_view, dtype=bool)]
-
-
-def _inside(shape, view):
-    """The parts of ``shape``, a polygon or lines, inside the box ``view``: a list of
-    polygons or of lines, empty where ``shape`` lies outside the box."""
-    if view.contains(shape):
-        return list(shapely.get_parts(shape))
-    kind = "Polygon" if shape.geom_type.endswith("Polygon") else "LineString"
-    parts = shapely.get_parts(shape.intersection(view))
-    return [part for part in parts if part.geom_type == kind and not part.is_empty]
 
 
 def _floor_traces(areas, openings, origin, view):
@@ -413,23 +354,14 @@ def _building_outline_traces(outlines, origin):
     return [trace.update(hoverinfo="skip", hovertemplate=None) for trace in traces]
 
 
-def _platform_floors(areas, view):
-    """The keys of the platform areas among ``areas`` that have a floor in the box
-    ``view`` (see :func:`pyrosm3d.tags.element_keys`)."""
-    platforms = areas[(areas["kind"] == "platform") & areas.intersects(view)]
-    columns = (element_keys(platforms), platforms["levels"])
-    return {key for key, levels in zip(*columns) if floor_levels("platform", levels)}
-
-
 def _network_traces(edges, origin, platform_floors=(), between=()):
     """The ``edges`` of the walking network as lines, one trace for each kind of edge
     (see :func:`pyrosm3d.plot_network`) and each set of levels an edge is shown on:
-    the levels at its two ends, and for a level between two floors also the nearest
-    whole level, unless an area has its floor there (the levels ``between``, see
-    :func:`pyrosm3d.floors.floors_between_levels`). The platform edges of the
-    elements among ``platform_floors`` (keys, see :func:`_platform_floors`) are left
-    out: the outline of a platform mapped as a closed way is an edge, and its floor
-    is drawn with an outline already."""
+    those of :func:`pyrosm3d.indoor_view.shown_levels` with the levels ``between``.
+    The platform edges of the elements among ``platform_floors`` (keys, see
+    :class:`pyrosm3d.indoor_view.IndoorBox`) are left out: the outline of a platform
+    mapped as a closed way is an edge, and its floor is drawn with an outline
+    already."""
     lines = {kind: _LevelLines() for kind in _STYLES}
     kinds = zip(element_keys(edges), _edge_kinds(edges))
     for key, (row, tags, kind, level_u, level_v) in kinds:
@@ -437,11 +369,8 @@ def _network_traces(edges, origin, platform_floors=(), between=()):
             continue
         z_u, z_v = (lv * FLOOR_HEIGHT + _NETWORK_LIFT for lv in (level_u, level_v))
         points = _line_points(row.geometry, z_u, z_v, origin, vertical=kind == "lift")
-        ends = {float(level_u), float(level_v)}
-        beside = {float(math.floor(end + 0.5)) for end in ends - set(between)}
-        shown = sorted(ends | beside)
         text = _edge_text(row, tags, kind, level_u, level_v)
-        lines[kind].add(shown, *points, text, key)
+        lines[kind].add(shown_levels(level_u, level_v, between), *points, text, key)
     traces = []
     for kind, (name, colour, width, dash) in _STYLES.items():
         traces += lines[kind].traces(name, colour, width, dash)

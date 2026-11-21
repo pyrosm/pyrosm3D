@@ -5,7 +5,8 @@ from dataclasses import replace
 import pytest
 from shapely.geometry import box
 
-from pyrosm3d.figure import _view_box, layers_figure, level_views
+from pyrosm3d.figure import layers_figure, level_views
+from pyrosm3d.indoor_view import _view_box
 from pyrosm3d.page import _element_notes, layers_page
 from pyrosm3d.styles import AREA_STYLES
 
