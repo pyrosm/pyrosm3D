@@ -80,6 +80,8 @@ _DOOR_LIFT, _POI_LIFT = WALL_HEIGHT / 2, 0.3
 # Pixels that outlines are wide in the indoor view: of rooms and corridors, of levels,
 # of buildings
 _ROOM_OUTLINE, _LEVEL_OUTLINE, _BUILDING_OUTLINE = 1.5, 2.5, 2.0
+# The tags of contact details, which the page does not list
+_CONTACT_KEYS = ("email", "phone", "fax", "mobile")
 # The drawn height of the indoor view, 1 m under its lowest level to 2 m over its
 # highest, stays between these shares of the longest side of its box
 _LOWEST_SHARE, _HIGHEST_SHARE = 0.12, 1.1
@@ -784,7 +786,8 @@ def to_html(
     The page is that of :func:`plot_indoor`: the level picker names the number of
     areas on each level, and a tap on an area, a line of the network, a door, a shop
     or a stairwell or lift column says what the element is, lists its OpenStreetMap
-    tags and links to it.
+    tags, apart from contact details such as ``email`` and ``phone``, and links to
+    it.
 
     Parameters
     ----------
@@ -843,12 +846,19 @@ def element_notes(indoor):
     return notes
 
 
+def _is_contact(key):
+    """Whether the tag ``key`` holds contact details: ``email``, ``phone``, ``fax``,
+    ``mobile`` or a ``contact:`` key."""
+    return key in _CONTACT_KEYS or key.startswith("contact:")
+
+
 def _element_table(indoor, groups):
     """The elements that the items of ``groups`` belong to, as ``[key, note, tags]``
     (see :func:`element_notes`), in the order in which the items first name them: an
     item's own key (``q``), or the way, relation or node of a line of the network.
     Each item's ``q`` becomes the number of its element in the table; an element
-    without tags is not listed."""
+    without tags is not listed. The tags leave out contact details (see
+    :func:`_is_contact`)."""
     tags = dict(zip(element_keys(indoor.edges), row_tags(indoor.edges)))
     for layer in (indoor.areas, indoor.doors, indoor.pois):
         tags.update(zip(element_keys(layer), layer["tags"]))
@@ -866,7 +876,11 @@ def _element_table(indoor, groups):
                 continue
             if key not in numbers:
                 numbers[key] = len(table)
-                listed = {name: str(value) for name, value in tags[key].items()}
+                listed = {
+                    name: str(value)
+                    for name, value in tags[key].items()
+                    if not _is_contact(name)
+                }
                 table.append([key, notes.get(key, ""), listed])
             item["q"] = numbers[key]
     return table

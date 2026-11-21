@@ -20,7 +20,8 @@ The data of a view is a dict that the page script reads:
     The texts that the items of the network refer to by number: ``names`` and
     ``highways``; and the ``elements`` that items refer to by number (``q``), each
     ``[key, note, tags]``: a key such as ``"way 123"``, what the element is and its
-    OpenStreetMap tags, which a tap on an item shows with a link to the element.
+    OpenStreetMap tags without contact details, which a tap on an item shows with a
+    link to the element.
 ``view``
     Where the camera starts: deck.gl's view state of an orbit view (``target``,
     ``rotationX``, ``rotationOrbit``, ``zoom``) and its limits (``minZoom``,

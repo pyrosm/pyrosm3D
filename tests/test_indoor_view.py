@@ -434,6 +434,17 @@ def test_to_html_writes_the_view_with_levels_and_tags(
     assert room["info"].startswith(item["t"] + "\n\n" + note + "\n")
     assert "indoor = room" in room["info"] and note.startswith("room · level")
     assert tags["indoor"] == "room"
+    # contact details are not listed, though the elements have them
+    contacts = ("email", "phone", "fax", "mobile")
+    held = [
+        name
+        for layer in (maunula.areas, maunula.doors, maunula.pois)
+        for found in layer["tags"]
+        for name in found
+        if name in contacts or name.startswith("contact:")
+    ]
+    listed = [name for _, _, found in view.data["tables"]["elements"] for name in found]
+    assert held and not [name for name in listed if name in held]
     assert room["links"] == ["https://www.openstreetmap.org/" + key.replace(" ", "/")]
     assert level_floor["info"] == "Floor of level 0" and level_floor["links"] == []
 
