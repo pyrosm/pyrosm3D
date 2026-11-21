@@ -34,7 +34,8 @@ The data of a view is a dict that the page script reads:
 ``indoor``
     On a page with indoor elements: the ``box`` of the indoor view, its ``levels``
     (each a level and its height), the height of the ``ground``, its ``background``
-    colour and how much taller than to scale it draws the heights (``stretch``).
+    colour, how much taller than to scale it draws the heights (``stretch``) and,
+    optionally, the ``level`` that it opens on.
 """
 
 import html

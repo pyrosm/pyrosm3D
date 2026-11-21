@@ -621,14 +621,16 @@ class _NetworkLines:
         self.items = {kind: [] for kind in _STYLES}
         self.names, self.highways = {}, {}
 
-    def add(self, kind, row, tags, level_u, level_v, points, ground):
+    def add(self, kind, row, tags, level_u, level_v, points, ground, levels=None):
         """Add the edge ``row`` of the ``kind``, drawn through ``points`` (x, y and z
         in metres) from ``level_u`` to ``level_v``, over the ground at the height
         ``ground``: below ground when its points lie under it by more than
         ``_BELOW_GROUND`` on average. An edge that goes on where the last one of its
         kind ends, of the same element (one with an id) and as far below ground,
         makes one line with it. An edge that joins several ways, kept whole, or has
-        no id has a text of its own instead of numbers into the tables."""
+        no id has a text of its own instead of numbers into the tables. The indoor
+        view shows the line on ``levels`` (``ls``) where they are given and other
+        than its first level."""
         points = np.round(points, 1)
         below = int(np.nanmean(points[:, 2]) - ground < _BELOW_GROUND)
         heights = [float(points[:, 2].min()), float(points[:, 2].max())]
@@ -643,6 +645,8 @@ class _NetworkLines:
             else:
                 text = "\n".join((name, highway, end_levels_text(level_u, level_v)))
             item = {"p": points.tolist(), "t": text}
+            if levels is not None:
+                item["ls"] = list(levels)
             if below:
                 item["b"] = 1
             if self.in_metres:
@@ -661,6 +665,10 @@ class _NetworkLines:
         ):
             last["p"] += path[1:]
             last["c"] = float(level_v)
+            if levels is not None:
+                shown = sorted(set(last.get("ls", [last["a"]])) | set(levels))
+                if shown != [last["a"]]:
+                    last["ls"] = shown
             if self.in_metres:
                 last["m"] = [
                     min(last["m"][0], heights[0]),
@@ -677,6 +685,8 @@ class _NetworkLines:
         }
         if code:
             item["e"] = code
+        if levels is not None and list(levels) != [item["a"]]:
+            item["ls"] = list(levels)
         if below:
             item["b"] = 1
         if self.in_metres:

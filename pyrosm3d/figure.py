@@ -17,7 +17,6 @@ import shapely
 
 from pyrosm3d.columns import shaft_columns
 from pyrosm3d.floors import floor_levels, floor_openings, triangles
-from pyrosm3d.indoor import indoor_layers
 from pyrosm3d.indoor_view import IndoorBox, _inside, shown_levels
 from pyrosm3d.network import _STYLES, _edge_kinds, _edge_text, _line_points
 from pyrosm3d.styles import (
@@ -86,39 +85,10 @@ def _lines(trace, name, colour, width, dash):
     )
 
 
-def plot_indoor(elements, edges=None, nodes=None, buildings=None, level=None):
-    """A plotly Figure of indoor elements in 3D (see the module docstring), from frames
-    read with pyrosm (``osm`` is a ``pyrosm.OSM`` object); ``osm.in3d.plot_indoor()``
-    makes these reads itself.
-
-    Parameters
-    ----------
-    elements : GeoDataFrame
-        ``osm.get_indoor_elements(walking_areas=True)``. The figure shows the areas
-        and what lies within 10 m of them; a walking area, such as a square or a
-        pedestrian street, is drawn as far as the other areas' view reaches.
-    edges, nodes : GeoDataFrame (optional)
-        ``osm.get_network("walking", nodes=True, indoor_elements=True,
-        walking_areas=True)``, drawn on its levels.
-    buildings : GeoDataFrame (optional)
-        ``osm.get_buildings()``, for the outlines.
-    level : float (optional)
-        Draw only what is on this level, without the columns of stairwells and lift
-        shafts; by default all levels.
-
-    Returns
-    -------
-    plotly.graph_objects.Figure
-        A click on a legend entry hides or shows it. The outer walls, the doors and
-        the shops are hidden until they are picked in the legend. As HTML the figure
-        has the controls for touch screens of :class:`pyrosm3d.touch.TouchFigure`.
-    """
-    return layers_figure(indoor_layers(elements, nodes, edges, buildings), level)
-
-
-def layers_figure(indoor, level=None):
-    """The figure of :func:`plot_indoor` for the layers ``indoor`` (an IndoorLayers,
-    see :func:`pyrosm3d.indoor.indoor_layers`)."""
+def layers_figure(indoor):
+    """The plotly figure of the layers ``indoor`` (an IndoorLayers, see
+    :func:`pyrosm3d.indoor.indoor_layers`) that the web page of
+    :func:`pyrosm3d.to_html` shows (see the module docstring)."""
     shown = IndoorBox(indoor)
     box, view, indoor = shown.box, shown.shape, shown.indoor
     origin = ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
@@ -136,13 +106,6 @@ def layers_figure(indoor, level=None):
         + _marker_traces(indoor.doors, DOOR_STYLE, WALL_HEIGHT / 2, origin, between)
         + _marker_traces(indoor.pois, POI_STYLE, _POI_LIFT, origin, between)
     )
-    if level is not None:
-        traces = [trace for trace in traces if level in trace.meta["levels"]]
-    if not traces:
-        raise ValueError(
-            "plot_indoor got nothing to draw"
-            + ("." if level is None else " on level %g." % level)
-        )
     in_legend = set()
     for trace in traces:
         trace.showlegend = trace.legendgroup not in in_legend
@@ -415,10 +378,9 @@ def _marker_traces(points, style, lift, origin, between=()):
 
 def level_views(figure):
     """``{level: scene}`` for each whole level of ``figure``, a figure of
-    :func:`plot_indoor` with all levels, and each level between two floors that an
-    area has its floor on: the range and the ticks of the vertical axis and the aspect
-    ratio of the scene that ``plot_indoor(level=...)`` gives that level, as plotly's
-    ``relayout`` takes them."""
+    :func:`layers_figure`, and each level between two floors that an area has its
+    floor on: the range and the ticks of the vertical axis and the aspect ratio of the
+    scene of what is on that level alone, as plotly's ``relayout`` takes them."""
     scene = figure.layout.scene
     (west, east), (south, north) = scene.xaxis.range, scene.yaxis.range
     on_levels = [trace.meta["levels"] for trace in figure.data]

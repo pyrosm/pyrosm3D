@@ -19,8 +19,17 @@ import shapely
 
 from pyrosm3d.columns import shaft_columns
 from pyrosm3d.floors import floor_levels, floor_openings, floors_between_levels
+from pyrosm3d.indoor import indoor_layers
+from pyrosm3d.network import (
+    _edge_kinds,
+    _edge_points,
+    _flat_ground,
+    _NetworkLines,
+    _start_view,
+)
 from pyrosm3d.styles import (
     AREA_STYLES,
+    BACKGROUND_COLOUR,
     COLUMN_STYLES,
     DOOR_STYLE,
     FLOOR_HEIGHT,
@@ -37,6 +46,7 @@ from pyrosm3d.styles import (
     metres_of_levels,
 )
 from pyrosm3d.tags import element_keys
+from pyrosm3d.view import View
 from pyrosm3d.walls import building_outlines, inner_walls, outer_walls
 
 # Metres that a wall is thick
@@ -445,3 +455,126 @@ def indoor_groups(view, origin, heights=level_heights):
     ):
         groups.append(_point_group(points, style, lift, view.between, heights, origin))
     return [group for group in groups if group["items"]]
+
+
+def plot_indoor(elements, edges=None, nodes=None, buildings=None, level=None):
+    """A 3D view of indoor elements (see the module docstring), from frames read with
+    pyrosm (``osm`` is a ``pyrosm.OSM`` object); ``osm.in3d.plot_indoor()`` makes
+    these reads itself.
+
+    Parameters
+    ----------
+    elements : GeoDataFrame
+        ``osm.get_indoor_elements(walking_areas=True)``. The view shows the areas
+        and what lies within 10 m of them; a walking area, such as a square or a
+        pedestrian street, is drawn as far as the other areas' view reaches.
+    edges, nodes : GeoDataFrame (optional)
+        ``osm.get_network("walking", nodes=True, indoor_elements=True,
+        walking_areas=True)``, drawn on its levels.
+    buildings : GeoDataFrame (optional)
+        ``osm.get_buildings()``, for the outlines.
+    level : float (optional)
+        The level that the indoor view opens on; by default all levels.
+
+    Returns
+    -------
+    pyrosm3d.View
+        In a notebook the view is the output of the cell; ``view.to_html(path)`` writes
+        it as a page and ``view.show()`` shows it. It opens in the indoor view, where
+        one level or all can be picked, with the heights drawn taller unless "True
+        heights" is on; a level is drawn 4 m from the next above the ground floor and
+        6 m below it. The outer walls, the doors and the shops are off until they are
+        switched on in the list of layers. The solid model and the see-through map
+        show the elements on a flat ground at street level.
+    """
+    return layers_view(indoor_layers(elements, nodes, edges, buildings), level)
+
+
+def _levels_of(groups):
+    """The levels of the items of ``groups``: an item's level, or the levels that the
+    indoor view shows a line on."""
+    found = set()
+    for group in groups:
+        for item in group["items"]:
+            if "l" in item:
+                found.add(item["l"])
+            elif group["kind"] == "lines":
+                found.update(item.get("ls", [item.get("a", 0.0)]))
+    return found
+
+
+def _points_of(groups):
+    """The points of the items of ``groups``, as a list of paths: the lines, the outer
+    rings of the polygons and the points."""
+    paths = []
+    for group in groups:
+        for item in group["items"]:
+            if "p" in item:
+                paths.append(item["p"])
+            elif "r" in item:
+                paths.append(item["r"][0])
+            else:
+                paths.append([item["c"]])
+    return paths
+
+
+def layers_view(indoor, level=None):
+    """The view of :func:`plot_indoor` for the layers ``indoor`` (an IndoorLayers, see
+    :func:`pyrosm3d.indoor.indoor_layers`): the groups of :func:`indoor_groups` and
+    the walking network in metres from the middle of the indoor view's box; the
+    platform edges of the platforms with a floor are left out. The level picker lists
+    the whole levels and those between them with floors, apart from what only doors
+    and shops are on. Raises a ValueError for a ``level`` that it does not list."""
+    shown = IndoorBox(indoor)
+    west, south, east, north = shown.box
+    origin = ((west + east) / 2, (south + north) / 2)
+    lines = _NetworkLines(in_metres=False)
+    edges = shown.indoor.edges
+    for key, (row, tags, kind, level_u, level_v) in zip(
+        element_keys(edges), _edge_kinds(edges)
+    ):
+        if kind == "platform" and key in shown.platform_floors:
+            continue
+        points = _edge_points(row.geometry, kind, level_u, level_v, origin, False)
+        on_levels = shown_levels(level_u, level_v, shown.between)
+        lines.add(
+            kind, row, tags, level_u, level_v, np.column_stack(points), 0.0, on_levels
+        )
+    drawn = indoor_groups(shown, origin)
+    points = [group for group in drawn if group["kind"] == "points"]
+    groups = [group for group in drawn if group["kind"] != "points"]
+    groups += lines.groups() + points
+    picked = sorted(
+        found
+        for found in _levels_of(groups[: len(groups) - len(points)])
+        if float(found).is_integer() or found in shown.between
+    )
+    if level is not None and float(level) not in picked:
+        raise ValueError("plot_indoor got nothing to draw on level %g." % level)
+    every = sorted(_levels_of(groups))
+    low, high = (level_heights(0.0, 0.0, found) for found in (every[0], every[-1]))
+    corners = (west - origin[0], south - origin[1], east - origin[0], north - origin[1])
+    paths = _points_of(groups)
+    view, fit = _start_view(paths, lambda x, y: 0.0, turned=False, radius=None)
+    data = dict(
+        mode="indoor",
+        view=view,
+        fit=fit,
+        stretch=HEIGHT_STRETCH,
+        tables=lines.tables(),
+        indoor=dict(
+            box=[round(value, 1) for value in corners],
+            levels=[[found, level_heights(0.0, 0.0, found)] for found in picked],
+            ground=0.0,
+            background=BACKGROUND_COLOUR,
+            stretch=round(indoor_stretch(shown.box, low, high), 3),
+        ),
+        groups=[_flat_ground(paths)] + groups,
+    )
+    if level is not None:
+        data["indoor"]["level"] = float(level)
+    about = (
+        "The indoor elements of a place at their levels: the floors of the areas, "
+        "walls, stairwells and lift shafts, and the walking network."
+    )
+    return View(data, title="Indoor elements", about=about)

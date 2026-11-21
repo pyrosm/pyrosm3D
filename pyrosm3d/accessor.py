@@ -1,7 +1,7 @@
 """The ``in3d`` accessor of ``pyrosm.OSM``: 3D views of what an OSM object reads."""
 
-from pyrosm3d.figure import plot_indoor
 from pyrosm3d.heights import network_heights
+from pyrosm3d.indoor_view import plot_indoor
 from pyrosm3d.network import plot_network
 from pyrosm3d.page import to_html
 
@@ -37,27 +37,25 @@ class In3D:
         return dict(elements=elements, edges=edges, nodes=nodes, buildings=buildings)
 
     def plot_indoor(self, level=None):
-        """A plotly Figure of the indoor elements in 3D: the floors of rooms,
-        corridors, platforms and walking areas at their levels, walls with door gaps,
-        the columns of stairwells and lift shafts, and the walking network.
+        """A 3D view of the indoor elements: the floors of rooms, corridors, platforms
+        and walking areas at their levels, walls with door gaps, the columns of
+        stairwells and lift shafts, and the walking network.
 
         Parameters
         ----------
         level : float (optional)
-            Draw only what is on this level, without the columns of stairwells and
-            lift shafts; by default all levels.
+            The level that the indoor view opens on; by default all levels.
 
         Returns
         -------
-        plotly.graph_objects.Figure
-            The figure of :func:`pyrosm3d.plot_indoor`.
+        pyrosm3d.View
+            The view of :func:`pyrosm3d.plot_indoor`.
         """
         return plot_indoor(**self._indoor_frames(), level=level)
 
     def to_html(self, path, title="Indoor elements", include_plotlyjs=True):
-        """Write a web page with the 3D view of the indoor elements: the figure of
-        :meth:`plot_indoor` with a button for each level and the OpenStreetMap tags of
-        a clicked element.
+        """Write a web page with a plotly figure of the indoor elements in 3D, a
+        button for each level and the OpenStreetMap tags of a clicked element.
 
         Parameters
         ----------

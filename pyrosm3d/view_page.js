@@ -27,10 +27,10 @@
 
   function begin(data) {
     // the view that the page opens in and, in the indoor view, the picked level
-    // (null: all levels)
+    // (null: all levels), the one that the data names at the start
     let mode = data.mode || view.SOLID;
     if (mode === view.INDOOR && !data.indoor) mode = view.SOLID;
-    let level = null;
+    let level = data.indoor && data.indoor.level !== undefined ? data.indoor.level : null;
     // what is switched on: in the views of the city, and in the indoor view, where
     // every kind of line of the network is on at the start
     const shownBy = { solid: new Map(), indoor: new Map() };
@@ -66,11 +66,16 @@
       const highest = data.view.maxZoom === undefined ? Infinity : data.view.maxZoom;
       return Math.max(lowest, Math.min(highest, fits));
     };
+    // the height of the picked level of the indoor view; with all levels, of its ground
+    const levelHeight = () => {
+      const picked = level === null ? null : data.indoor.levels.find((entry) => entry[0] === level);
+      return picked ? picked[1] : data.indoor.ground;
+    };
     const indoorStart = () => {
       const box = data.indoor.box;
       const longest = Math.max(box[2] - box[0], box[3] - box[1]);
       return {
-        target: [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2, data.indoor.ground * stretched()],
+        target: [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2, levelHeight() * stretched()],
         rotationX: INDOOR_START.tilt,
         rotationOrbit: INDOOR_START.turn,
         zoom: zoomThatFits(INDOOR_START.across * longest, INDOOR_START.down * longest),
@@ -234,10 +239,9 @@
     function setLevel(next) {
       level = next === null || next === undefined || next === "" ? null : Number(next);
       levelPick.value = level === null ? "" : String(level);
-      const picked = level === null ? null : data.indoor.levels.find((entry) => entry[0] === level);
-      if (picked && !state.walk) {
+      if (level !== null && !state.walk) {
         state = Object.assign({}, state, {
-          target: [state.target[0], state.target[1], picked[1] * stretched()],
+          target: [state.target[0], state.target[1], levelHeight() * stretched()],
         });
       }
       draw();
@@ -376,6 +380,7 @@
           option.textContent = choice[1];
           levelPick.appendChild(option);
         });
+      levelPick.value = level === null ? "" : String(level);
       levelPick.addEventListener("change", () => setLevel(levelPick.value));
     }
 

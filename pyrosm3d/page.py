@@ -1,4 +1,4 @@
-"""A web page of the indoor elements of a place: the figure of plot_indoor with a
+"""A web page of the indoor elements of a place: a plotly figure of them with a
 button for each level, a button for the legend and a panel for the OpenStreetMap tags
 of a clicked element."""
 
@@ -30,7 +30,7 @@ def to_html(
     """Write a web page with the 3D view of indoor elements, from frames read with
     pyrosm; ``osm.in3d.to_html(path)`` makes these reads itself.
 
-    The page shows the figure of :func:`pyrosm3d.plot_indoor`. Its buttons show all
+    The page shows a plotly figure of the indoor elements. Its buttons show all
     levels or one level (each level's button has the number of areas on it) and show
     or hide the legend, and a click on an area, a line of the network, a marker or a
     stairwell or lift column shows what the element is and its OpenStreetMap tags

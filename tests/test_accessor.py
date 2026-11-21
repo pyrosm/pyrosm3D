@@ -2,17 +2,13 @@ import networkx as nx
 import pytest
 
 from pyrosm3d import In3D, network_heights, plot_network
-from pyrosm3d.figure import layers_figure
+from pyrosm3d.indoor_view import layers_view
 
 
 def _slope(longitudes, latitudes):
     """A terrain that rises 1 m for each 0.0001 degrees north of 60.23 N."""
     return (latitudes - 60.23) * 1e4
 
-
-def _summary(figure):
-    """The name, the levels and the number of points of each trace of a figure."""
-    return [(trace.name, trace.meta, len(trace.x)) for trace in figure.data]
 
 
 def test_in3d_draws_the_indoor_elements_of_its_osm_object(
@@ -22,10 +18,8 @@ def test_in3d_draws_the_indoor_elements_of_its_osm_object(
     and to_html do: all levels, one level, and the web page with a button for each
     level."""
     in3d = In3D(maunula_osm)
-    assert _summary(in3d.plot_indoor()) == _summary(layers_figure(maunula))
-    one_level = in3d.plot_indoor(level=1)
-    assert _summary(one_level) == _summary(layers_figure(maunula, level=1))
-    assert all(1 in trace.meta["levels"] for trace in one_level.data)
+    assert in3d.plot_indoor().data == layers_view(maunula).data
+    assert in3d.plot_indoor(level=1).data == layers_view(maunula, level=1).data
 
     path = in3d.to_html(
         tmp_path / "maunula.html", title="Maunula-talo", include_plotlyjs="cdn"
