@@ -6,7 +6,7 @@ pyrosm3d has no release yet. Install it from GitHub with pip:
 pip install "pyrosm3d @ git+https://github.com/pyrosm/pyrosm3D@main"
 ```
 
-This also installs its dependencies: geopandas, numpy, pandas, plotly (5.15 or later) and shapely (2.1 or later). Python 3.11 or later is needed.
+This also installs its dependencies: geopandas, numpy, pandas and shapely (2.1 or later). Python 3.11 or later is needed. The views are web pages that load the deck.gl library from the jsDelivr network when they are shown.
 
 ## Terrain models
 

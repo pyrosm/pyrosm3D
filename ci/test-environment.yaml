@@ -9,7 +9,6 @@ dependencies:
   - setuptools>=77
   - geopandas
   - shapely>=2.1
-  - plotly
   # pyrosm, built from its main branch
   - cython
   - protobuf>=6.33.5

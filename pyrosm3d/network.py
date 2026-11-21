@@ -23,7 +23,9 @@ import numpy as np
 import pandas as pd
 import shapely
 from geopandas import GeoDataFrame
+from pyproj import Transformer
 
+from pyrosm3d.buildings import _street_level, frame_building_groups
 from pyrosm3d.dem import sample_dem
 from pyrosm3d.tags import (
     crosses_area,
@@ -34,10 +36,11 @@ from pyrosm3d.tags import (
     level_ranges,
     row_tags,
 )
-from pyrosm3d.styles import HEIGHT_STRETCH, metres_of_levels
+from pyrosm3d.styles import GROUND_DROP, HEIGHT_STRETCH, metres_of_levels
 from pyrosm3d.view import View
 
-# (name in the legend, colour, line width, dash) of each kind of edge
+# (name in the list of layers, colour, line width in pixels in the indoor view, dash)
+# of each kind of edge
 _STYLES = {
     "street": ("Walkways at street level", "#c3c7ce", 1.5, "solid"),
     "levels": ("Walkways on other levels", "#3987e5", 3.5, "solid"),
@@ -89,10 +92,13 @@ _OFF_AT_START = ("crossing",)
 # and keeps this share of its opacity in the see-through view
 _BELOW_GROUND = -1.5
 _BELOW_SHARE = 0.6
-# The ground: a grey surface this far under street level, as far as the network and
-# this many metres around it
+# The ground: a grey surface GROUND_DROP under street level or the terrain, as far as
+# the network and this many metres around it
 _GROUND_COLOUR = "#dde1e6"
-_GROUND_DROP = 0.4
+# The ground on a terrain is squares at least this many metres wide, and so wide that a
+# view holds at most this many across; the lines at the surface count for it at points
+# at most this many metres apart
+_TERRAIN_STEP, _TERRAIN_SQUARES, _SURFACE_STEP = 10.0, 100, 20.0
 _GROUND_MARGIN = 20.0
 
 
@@ -307,10 +313,10 @@ def _edge_kinds(edges):
         yield row, edge_tags, kind, z_u, z_v
 
 
-def _edge_text(row, tags, kind, level_u, level_v, newline="<br>"):
+def _edge_text(row, tags, kind, level_u, level_v):
     """The text of an edge: its name (else the name of its ``kind``), its element with
-    its ``highway`` value (else its ``kind``), and the levels that it is drawn at, on
-    lines joined by ``newline``."""
+    its ``highway`` value (else its ``kind``), and the levels that it is drawn at, each
+    on a line of its own."""
     element, ids = getattr(row, "osm_type", "way"), getattr(row, "id", "")
     if isinstance(ids, list):  # an edge that joins several ways and is kept whole
         element, ids = element + "s", ", ".join(dict.fromkeys(map(str, ids)))
@@ -319,7 +325,7 @@ def _edge_text(row, tags, kind, level_u, level_v, newline="<br>"):
         "%s %s · %s" % (element, ids, tags.get("highway", kind)),
         end_levels_text(level_u, level_v),
     )
-    return newline.join(parts)
+    return "\n".join(parts)
 
 
 def end_levels_text(level_u, level_v):
@@ -426,9 +432,9 @@ def _network_frames(edges, nodes, center, radius, route, areas, dem):
 
 
 def _near(geometry, middle, radius):
-    """Whether ``geometry`` reaches within ``radius`` metres of the point ``middle``
-    (always without a radius)."""
-    return radius is None or geometry.distance(middle) <= radius
+    """Whether ``geometry``, a geometry or an array of them, reaches within
+    ``radius`` metres of the point ``middle`` (always without a radius)."""
+    return radius is None or shapely.distance(geometry, middle) <= radius
 
 
 def _area_lines(areas, middle, radius):
@@ -486,7 +492,15 @@ def _entrance_heights(entrances, levels, edges, dem):
 
 
 def plot_network(
-    edges, nodes=None, center=None, radius=None, route=None, areas=None, dem=None
+    edges,
+    nodes=None,
+    center=None,
+    radius=None,
+    route=None,
+    areas=None,
+    dem=None,
+    buildings=None,
+    building_parts=None,
 ):
     """A 3D view of an indoor network (see the module docstring).
 
@@ -528,6 +542,14 @@ def plot_network(
         an edge drawn on its level at its node, else on the ground. A tapped edge
         shows its heights, and an edge with a vertex where the terrain model has no
         height is left out. The edges need the columns ``u`` and ``v``.
+    buildings : GeoDataFrame (optional)
+        ``osm.get_buildings()``, drawn as blocks in the solid model and as footprints
+        in the see-through map (see :mod:`pyrosm3d.buildings`): those that reach
+        within ``radius`` of ``center``, on the terrain with ``dem``.
+    building_parts : GeoDataFrame (optional)
+        The building parts of
+        ``osm.get_data_by_custom_criteria({"building:part": True})``: a building with
+        parts is drawn by those that have a height and by what they leave of it.
 
     Returns
     -------
@@ -590,8 +612,19 @@ def plot_network(
     ]
     if not paths:  # nothing within the radius: an empty view at the center
         paths = [[[0.0, 0.0, 0.0]]]
-    if not in_metres:
-        groups.insert(0, _flat_ground(paths))
+    blocks = frame_building_groups(
+        (buildings, building_parts),
+        crs,
+        origin,
+        _terrain(crs, dem) if in_metres else _street_level,
+        keep=None if radius is None else lambda shapes: _near(shapes, middle, radius),
+    )
+    groups = blocks + groups
+    footprints = [item["r"][0] for group in blocks for item in group["items"]]
+    if in_metres:
+        groups.insert(0, _terrain_ground(paths, footprints, _terrain(crs, dem), origin))
+    else:
+        groups.insert(0, _flat_ground(paths + footprints))
     shown = [item["p"] for item in route_groups[0]["items"]] if route_groups else paths
     ground_at = _ground_at_middle(crs, origin, dem)
     view, fit = _start_view(shown, ground_at, turned=bool(route_groups), radius=radius)
@@ -621,14 +654,16 @@ class _NetworkLines:
         self.items = {kind: [] for kind in _STYLES}
         self.names, self.highways = {}, {}
 
-    def add(self, kind, row, tags, level_u, level_v, points, ground):
+    def add(self, kind, row, tags, level_u, level_v, points, ground, levels=None):
         """Add the edge ``row`` of the ``kind``, drawn through ``points`` (x, y and z
         in metres) from ``level_u`` to ``level_v``, over the ground at the height
         ``ground``: below ground when its points lie under it by more than
         ``_BELOW_GROUND`` on average. An edge that goes on where the last one of its
         kind ends, of the same element (one with an id) and as far below ground,
         makes one line with it. An edge that joins several ways, kept whole, or has
-        no id has a text of its own instead of numbers into the tables."""
+        no id has a text of its own instead of numbers into the tables. The indoor
+        view shows the line on ``levels`` (``ls``) where they are given and other
+        than its first level."""
         points = np.round(points, 1)
         below = int(np.nanmean(points[:, 2]) - ground < _BELOW_GROUND)
         heights = [float(points[:, 2].min()), float(points[:, 2].max())]
@@ -639,10 +674,12 @@ class _NetworkLines:
         if isinstance(ids, list) or is_missing(ids) or ids == "":
             # an edge that joins several ways (kept whole) or has no id: its own text
             if isinstance(ids, list):
-                text = _edge_text(row, tags, kind, level_u, level_v, newline="\n")
+                text = _edge_text(row, tags, kind, level_u, level_v)
             else:
                 text = "\n".join((name, highway, end_levels_text(level_u, level_v)))
             item = {"p": points.tolist(), "t": text}
+            if levels is not None:
+                item["ls"] = list(levels)
             if below:
                 item["b"] = 1
             if self.in_metres:
@@ -661,6 +698,10 @@ class _NetworkLines:
         ):
             last["p"] += path[1:]
             last["c"] = float(level_v)
+            if levels is not None:
+                shown = sorted(set(last.get("ls", [last["a"]])) | set(levels))
+                if shown != [last["a"]]:
+                    last["ls"] = shown
             if self.in_metres:
                 last["m"] = [
                     min(last["m"][0], heights[0]),
@@ -677,6 +718,8 @@ class _NetworkLines:
         }
         if code:
             item["e"] = code
+        if levels is not None and list(levels) != [item["a"]]:
+            item["ls"] = list(levels)
         if below:
             item["b"] = 1
         if self.in_metres:
@@ -741,27 +784,127 @@ def _ground_under(metric, dem):
         return total / count
 
 
+def _terrain(crs, dem):
+    """The heights of the terrain model ``dem`` at points in the metres of ``crs``,
+    NaN where it has none, as a function ``(x, y) -> heights``."""
+
+    to_lonlat = Transformer.from_crs(crs, 4326, always_xy=True)
+
+    def heights(x, y):
+        longitudes, latitudes = to_lonlat.transform(np.asarray(x), np.asarray(y))
+        return sample_dem(longitudes, latitudes, dem)
+
+    return heights
+
+
 def _ground_at_middle(crs, origin, dem):
     """The height of the ground at a point ``x``, ``y`` metres from ``origin`` in
     ``crs``: from the terrain model ``dem``, 0 without one or where it has none, as a
     function ``(x, y) -> height``."""
     if dem is None:
         return lambda x, y: 0.0
+    terrain = _terrain(crs, dem)
 
     def ground(x, y):
-        point = GeoDataFrame(
-            geometry=[shapely.Point(origin[0] + x, origin[1] + y)], crs=crs
-        ).to_crs(4326)
-        height = sample_dem(
-            point.geometry.x.to_numpy(), point.geometry.y.to_numpy(), dem
-        )
-        return float(height[0]) if np.isfinite(height[0]) else 0.0
+        height = terrain([origin[0] + x], [origin[1] + y])[0]
+        return float(height) if np.isfinite(height) else 0.0
 
     return ground
 
 
+def _surface_points(paths):
+    """The points of ``paths`` (lists of ``[x, y, z]``) and, between two of them more
+    than ``_SURFACE_STEP`` apart, points along the line at most that far apart, as an
+    array of x, y and z."""
+    found = []
+    for path in paths:
+        points = np.asarray(path, dtype=float)
+        found.append(points[:1])
+        for start, end in zip(points[:-1], points[1:]):
+            pieces = max(1, int(np.ceil(np.hypot(*(end - start)[:2]) / _SURFACE_STEP)))
+            share = np.arange(1, pieces + 1)[:, None] / pieces
+            found.append(start + share * (end - start))
+    return np.concatenate(found)
+
+
+def _lowered_corners(at_corners, points, xs, ys):
+    """How far each corner of the squares of a ground with the heights ``at_corners``
+    (rows from south to north at ``ys``, columns from west to east at ``xs``) has to
+    come down so that no square rises over any of ``points`` (x, y, z) in it. A square
+    is drawn as two triangles, split along either diagonal, so it may not rise over a
+    point by either split; each corner comes down by the most that a square around it
+    needs."""
+    step = xs[1] - xs[0]
+    across, up = (points[:, 0] - xs[0]) / step, (points[:, 1] - ys[0]) / step
+    column, line = np.floor(across).astype(int), np.floor(up).astype(int)
+    inside = (column >= 0) & (line >= 0) & (column < len(xs) - 1) & (line < len(ys) - 1)
+    column, line, points = column[inside], line[inside], points[inside]
+    s, t = across[inside] - column, up[inside] - line
+    sw, se = at_corners[line, column], at_corners[line, column + 1]
+    nw, ne = at_corners[line + 1, column], at_corners[line + 1, column + 1]
+    one = np.where(
+        s >= t, sw + s * (se - sw) + t * (ne - se), sw + t * (nw - sw) + s * (ne - nw)
+    )
+    other = np.where(
+        s + t <= 1,
+        sw + s * (se - sw) + t * (nw - sw),
+        ne + (1 - s) * (nw - ne) + (1 - t) * (se - ne),
+    )
+    over = np.nan_to_num(np.maximum(one, other) - points[:, 2], nan=0.0).clip(min=0)
+    most = np.zeros((len(ys) - 1, len(xs) - 1))
+    np.maximum.at(most, (line, column), over)
+    lowered = np.zeros(at_corners.shape)
+    for down in (0, 1):
+        for right in (0, 1):
+            part = lowered[down : down + len(ys) - 1, right : right + len(xs) - 1]
+            np.maximum(part, most, out=part)
+    return lowered
+
+
+def _terrain_ground(paths, footprints, terrain, origin):
+    """The ground of a view on a terrain: squares over the points of ``paths`` and
+    ``footprints`` (lists of ``[x, y, z]`` in metres from ``origin``) and
+    ``_GROUND_MARGIN`` around them, ``_TERRAIN_STEP`` wide or wider so that the view
+    holds at most ``_TERRAIN_SQUARES`` across. Its corners lie ``GROUND_DROP`` under
+    ``terrain`` (heights at points in the metres of ``origin``), and lower where a
+    square would rise over a point of ``paths`` at the surface (not more than
+    ``_BELOW_GROUND`` under the terrain), so that it hides nothing at the surface; the
+    walker stands on the terrain itself (``t``). A corner where the terrain has no
+    height has none, and no square touches it."""
+    xy = np.array([point[:2] for path in paths + footprints for point in path])
+    low, high = xy.min(axis=0) - _GROUND_MARGIN, xy.max(axis=0) + _GROUND_MARGIN
+    step = max(_TERRAIN_STEP, float(np.ceil((high - low).max() / _TERRAIN_SQUARES)))
+    columns, rows = np.ceil((high - low) / step).astype(int) + 1
+    xs, ys = low[0] + step * np.arange(columns), low[1] + step * np.arange(rows)
+    grid_x, grid_y = np.meshgrid(xs, ys)
+    at_corners = np.asarray(
+        terrain(grid_x.ravel() + origin[0], grid_y.ravel() + origin[1]), dtype=float
+    ).reshape(grid_x.shape)
+    points = _surface_points(paths)
+    under = np.asarray(terrain(points[:, 0] + origin[0], points[:, 1] + origin[1]))
+    at_surface = np.isfinite(under) & (points[:, 2] - under >= _BELOW_GROUND)
+    lowered = _lowered_corners(at_corners, points[at_surface], xs, ys)
+    drawn = at_corners - lowered - GROUND_DROP
+
+    def heights(values):
+        return [None if not np.isfinite(v) else round(float(v), 1) for v in values]
+
+    grid = dict(
+        x=round(float(xs[0]), 1),
+        y=round(float(ys[0]), 1),
+        step=step,
+        rows=len(ys),
+        columns=len(xs),
+        z=heights(drawn.ravel()),
+        t=heights(at_corners.ravel()),
+    )
+    return dict(
+        name="Ground", kind="ground", colour=_GROUND_COLOUR, visible=True, grid=grid
+    )
+
+
 def _flat_ground(paths):
-    """The ground of a view without a terrain model: one square at ``_GROUND_DROP``
+    """The ground of a view without a terrain model: one square at ``GROUND_DROP``
     under street level around the points of ``paths``, ``_GROUND_MARGIN`` beyond them;
     the walker stands on street level (``t``)."""
     xy = np.array([point[:2] for path in paths for point in path])
@@ -773,7 +916,7 @@ def _flat_ground(paths):
         step=round(side, 1),
         rows=2,
         columns=2,
-        z=[-_GROUND_DROP] * 4,
+        z=[-GROUND_DROP] * 4,
         t=[0.0] * 4,
     )
     return dict(

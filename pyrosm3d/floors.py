@@ -1,5 +1,5 @@
-"""The floors of indoor areas: the levels an area has a floor on, the openings that
-stairs and escalators need in a floor, and the triangles of a floor."""
+"""The floors of indoor areas: the levels an area has a floor on, and the openings
+that stairs and escalators need in a floor."""
 
 import math
 
@@ -71,10 +71,3 @@ def floor_openings(edges):
                 opening = part.buffer(width / 2, cap_style="flat")
                 openings.setdefault(float(level), []).append(opening)
     return {level: shapely.union_all(parts) for level, parts in openings.items()}
-
-
-def triangles(polygon):
-    """The triangles that cover ``polygon`` (a Polygon or MultiPolygon), as an array of
-    corner coordinates of the shape (triangles, 3, 2)."""
-    parts = shapely.constrained_delaunay_triangles(polygon.buffer(0))
-    return shapely.get_coordinates(parts).reshape(-1, 4, 2)[:, :3]

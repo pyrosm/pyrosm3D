@@ -253,26 +253,26 @@ def test_plot_network_edge_kinds(tags, vertical, levels, crossing, expected):
             {"name": "Asema", "highway": "footway"},
             "levels",
             (-1.0, -1.0),
-            "Asema<br>way 7 · footway<br>level -1",
+            "Asema\nway 7 · footway\nlevel -1",
         ),
         (
             {"highway": "steps"},
             "stairs",
             (0.0, 1.5),
-            "Stairs<br>way 7 · steps<br>levels 0 → 1.5",
+            "Stairs\nway 7 · steps\nlevels 0 → 1.5",
         ),
         (
             {},
             "crossing",
             (2.0, 2.0),
-            "Lines across areas<br>way 7 · crossing<br>level 2",
+            "Lines across areas\nway 7 · crossing\nlevel 2",
         ),
     ],
 )
 def test_plot_network_edge_text(tags, kind, levels, expected):
-    """The hover text of an edge names it (its name, else the legend entry of its
-    kind), its element with its highway value (else its kind) and the levels it is
-    drawn at: one level, or the levels of its two ends."""
+    """The text of an edge names it (its name, else the name of its kind in the list
+    of layers), its element with its highway value (else its kind) and the levels it
+    is drawn at: one level, or the levels of its two ends."""
 
     class Row:
         id = 7

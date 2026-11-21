@@ -1,0 +1,886 @@
+"""The indoor elements of a place as the groups of a 3D view (see
+:class:`pyrosm3d.View`), at heights in metres.
+
+The view shows the areas and what lies within 10 m of them: the floors of the areas,
+open where stairs, an escalator or a moving walkway rises through them, with their
+outlines; the walls of rooms, and walls mapped as lines or areas, as thin see-through
+blocks cut away at 40 % of a storey, with a gap at each door; stairwells and lift
+shafts as see-through columns; doors and shops as points, off at the start. The
+indoor view alone also draws the outlines of levels and of buildings, and the outer
+walls, a full storey high along those outlines, over the floors of their levels, both
+off at the start. Each item on one level carries it (``l``), for the level picker of
+the indoor view; a column through several floors has none. An item of an element
+carries the element's key (``q``, such as ``"way 123"``), for what a tap on it shows.
+"""
+
+from dataclasses import replace
+
+import numpy as np
+import shapely
+
+from pyrosm3d.buildings import _street_level, frame_building_groups
+from pyrosm3d.columns import shaft_columns
+from pyrosm3d.floors import floor_levels, floor_openings, floors_between_levels
+from pyrosm3d.indoor import indoor_layers
+from pyrosm3d.heights import network_heights
+from pyrosm3d.network import (
+    EDGE_NAMES,
+    _edge_kinds,
+    _edge_points,
+    _flat_ground,
+    _ground_at_middle,
+    _ground_under,
+    _NetworkLines,
+    _start_view,
+    _terrain,
+    _terrain_ground,
+    end_levels_text,
+)
+from pyrosm3d.styles import (
+    AREA_STYLES,
+    BACKGROUND_COLOUR,
+    COLUMN_STYLES,
+    DOOR_STYLE,
+    FLOOR_HEIGHT,
+    HEIGHT_STRETCH,
+    LEVEL_FLOOR_COLOUR,
+    LEVEL_OUTLINE_COLOUR,
+    OUTER_WALL_NAME,
+    OUTLINE_COLOUR,
+    POI_STYLE,
+    VIEW_MARGIN,
+    WALL_HEIGHT,
+    WALL_NAME,
+    WALL_COLOUR,
+    WALL_OPACITY,
+    metres_of_levels,
+)
+from pyrosm3d.tags import element_keys, row_tags
+from pyrosm3d.view import DECK_GL, View, polygon_parts, polygon_rings
+from pyrosm3d.walls import building_outlines, inner_walls, outer_walls
+
+# Metres that a wall is thick
+_WALL_THICKNESS = 0.12
+# How opaque (0 to 255) each face of a wall is: a look through a wall passes two faces
+# of its block, which together tint as much as one panel of WALL_OPACITY
+_WALL_ALPHA = round(255 * (1 - (1 - WALL_OPACITY) ** 0.5))
+_COLUMN_ALPHA = 77
+# Metres under the height of its level that a floor lies, so that the lines of the
+# network stay on it, and that the floor of a whole level lies under that
+_FLOOR_DROP = 0.15
+_LEVEL_FLOOR_DROP = 0.25
+# A floor outside buildings within this many metres of the terrain follows it, this
+# many metres over it
+_AT_SURFACE, _ON_TERRAIN = 1.5, 0.15
+# Metres under the height of its level that the outline of a level or a building lies:
+# over the floors, under the lines of the network
+_OUTLINE_DROP = 0.05
+# Metres over their floor that doors and shops stand
+_DOOR_LIFT, _POI_LIFT = WALL_HEIGHT / 2, 0.3
+# Pixels that outlines are wide in the indoor view: of rooms and corridors, of levels,
+# of buildings
+_ROOM_OUTLINE, _LEVEL_OUTLINE, _BUILDING_OUTLINE = 1.5, 2.5, 2.0
+# The tags of contact details, which the page does not list
+_CONTACT_KEYS = ("email", "phone", "fax", "mobile")
+# The drawn height of the indoor view, 1 m under its lowest level to 2 m over its
+# highest, stays between these shares of the longest side of its box
+_LOWEST_SHARE, _HIGHEST_SHARE = 0.12, 1.1
+
+
+def level_heights(x, y, level):
+    """The height in metres of ``level`` at the place ``x``, ``y``: that of
+    :func:`pyrosm3d.styles.metres_of_levels`, the same everywhere."""
+    return float(metres_of_levels(level))
+
+
+class LevelHeights:
+    """The heights of levels on a terrain: inside a building the median height of the
+    network's nodes on the level in that building, or for a level without them that of
+    the nearest level with them moved by the metres between the two
+    (:func:`pyrosm3d.styles.metres_of_levels`); outside buildings, and in a building
+    without such nodes, the terrain moved by the metres of the level. Called as
+    ``heights(x, y, level)``, it gives the height in metres, NaN where it has none.
+
+    Parameters
+    ----------
+    indoor : IndoorLayers
+        The layers, in metres, whose edges have the heights of
+        :func:`pyrosm3d.heights.network_heights` (``u_height`` and ``v_height``).
+    terrain : function
+        ``(x, y) -> heights`` of the terrain at points in the metres of the layers.
+    """
+
+    def __init__(self, indoor, terrain):
+        self.terrain = terrain
+        buildings = indoor.buildings.geometry.to_numpy()
+        self.areas = shapely.area(buildings)
+        self.tree = shapely.STRtree(buildings)
+        seen = {}
+        nodes, edges = indoor.nodes, indoor.edges
+        if "id" in nodes.columns and "u_height" in edges.columns:
+            xy = shapely.get_coordinates(nodes.geometry.to_numpy()).tolist()
+            place = dict(zip(nodes["id"].tolist(), xy))
+            for end in ("u", "v"):
+                columns = (edges[end], edges[end + "_level"], edges[end + "_height"])
+                for node, level, height in zip(*(c.tolist() for c in columns)):
+                    if node in place and np.isfinite(level) and np.isfinite(height):
+                        seen[(node, float(level))] = (place[node], height)
+        points = np.array([found for found, _ in seen.values()]).reshape(-1, 2)
+        levels = np.array([level for _, level in seen])
+        heights = np.array([height for _, height in seen.values()])
+        self.on_level = {
+            float(level): (
+                shapely.STRtree(shapely.points(points[levels == level])),
+                heights[levels == level],
+            )
+            for level in np.unique(levels)
+        }
+        inside = self._building_of(points)
+        self.in_building = {
+            int(building): {
+                float(level): float(
+                    np.median(heights[(inside == building) & (levels == level)])
+                )
+                for level in np.unique(levels[inside == building])
+            }
+            for building in np.unique(inside[inside >= 0])
+        }
+
+    def _building_of(self, points):
+        """The row of the smallest building around each of ``points`` (xy); -1 where
+        there is none."""
+        found = np.full(len(points), -1)
+        rows, buildings = self.tree.query(shapely.points(points), predicate="within")
+        order = np.lexsort((self.areas[buildings], rows))  # by point, smallest first
+        rows, buildings = rows[order], buildings[order]
+        first = np.r_[True, rows[1:] != rows[:-1]] if len(rows) else []
+        found[rows[first]] = buildings[first]
+        return found
+
+    def _ground(self, x, y):
+        """The height of the terrain at ``x``, ``y``."""
+        return float(self.terrain(np.array([x]), np.array([y]))[0])
+
+    def __call__(self, x, y, level):
+        """The height of ``level`` at ``x``, ``y`` (see the class docstring)."""
+        known = self.in_building.get(int(self._building_of(np.array([[x, y]]))[0]))
+        if known:
+            near = min(known, key=lambda other: abs(other - level))
+            return known[near] + float(metres_of_levels(level) - metres_of_levels(near))
+        return self._ground(x, y) + float(metres_of_levels(level))
+
+    def floor(self, polygon, level):
+        """The height of the floor of ``polygon`` on ``level``: in a building that of
+        the level; outside buildings the median height of the network's nodes on the
+        level on it, else the terrain moved by the metres of the level, and a floor
+        that lies within ``_AT_SURFACE`` of the terrain follows it, ``_ON_TERRAIN``
+        over it, as a function ``(x, y) -> heights``. NaN where it has none."""
+        spot = polygon.representative_point()
+        if self._building_of(np.array([[spot.x, spot.y]]))[0] >= 0:
+            return self(spot.x, spot.y, level) - _FLOOR_DROP
+        under = self._ground(spot.x, spot.y)
+        height = self._nodes_height_on(polygon, level)
+        if height is None:
+            height = under + float(metres_of_levels(level))
+        if not np.isfinite(height + under) or abs(height - under) >= _AT_SURFACE:
+            return height - _FLOOR_DROP
+
+        def on_terrain(x, y):
+            heights = np.asarray(self.terrain(x, y), dtype=float)
+            return np.where(np.isfinite(heights), heights, under) + _ON_TERRAIN
+
+        return on_terrain
+
+    def _nodes_height_on(self, polygon, level):
+        """The median height of the network's nodes on ``level`` that lie on
+        ``polygon``; None without any."""
+        if level not in self.on_level:
+            return None
+        tree, heights = self.on_level[level]
+        hits = tree.query(polygon.buffer(0.5), predicate="intersects")
+        return float(np.median(heights[hits])) if len(hits) else None
+
+
+def levels_text(levels):
+    """``"level 1"``, ``"levels 1, 2"`` or ``"no level"`` for the ``levels`` of an
+    element."""
+    if not levels:
+        return "no level"
+    listed = ", ".join("%g" % level for level in levels)
+    return ("level %s" if len(levels) == 1 else "levels %s") % listed
+
+
+def _view_box(indoor):
+    """``(west, south, east, north)`` of the indoor view: the bounds of the areas other
+    than walking areas, of the walking areas where there are no others, or of the
+    network where there are no areas, with a margin."""
+    areas = indoor.areas
+    frames = (areas[areas["kind"] != "walking_area"], areas, indoor.edges)
+    frame = next((frame for frame in frames if len(frame)), None)
+    if frame is None:
+        raise ValueError("plot_indoor got no areas and no network to draw.")
+    west, south, east, north = frame.total_bounds
+    return (
+        west - VIEW_MARGIN,
+        south - VIEW_MARGIN,
+        east + VIEW_MARGIN,
+        north + VIEW_MARGIN,
+    )
+
+
+def _areas_inside(areas, view):
+    """The rows of ``areas`` with a part inside the box ``view`` (see
+    :func:`_inside`). A walking area that lies outside the view of the other areas,
+    or only touches it, is left out: it has no floor and no outline in the view."""
+    in_view = [bool(_inside(shape, view)) for shape in areas.geometry]
+    return areas[np.array(in_view, dtype=bool)]
+
+
+def _inside(shape, view):
+    """The parts of ``shape``, a polygon or lines, inside the box ``view``: a list of
+    polygons or of lines, empty where ``shape`` lies outside the box."""
+    if view.contains(shape):
+        return list(shapely.get_parts(shape))
+    kind = "Polygon" if shape.geom_type.endswith("Polygon") else "LineString"
+    parts = shapely.get_parts(shape.intersection(view))
+    return [part for part in parts if part.geom_type == kind and not part.is_empty]
+
+
+def _platform_floors(areas, view):
+    """The keys of the platform areas among ``areas`` that have a floor in the box
+    ``view`` (see :func:`pyrosm3d.tags.element_keys`)."""
+    platforms = areas[(areas["kind"] == "platform") & areas.intersects(view)]
+    columns = (element_keys(platforms), platforms["levels"])
+    return {key for key, levels in zip(*columns) if floor_levels("platform", levels)}
+
+
+def shown_levels(level_u, level_v, between):
+    """The levels on which the indoor view shows an edge from ``level_u`` to
+    ``level_v``: those of its ends, and for an end between two floors also the nearest
+    whole level, unless an area has its floor there (one of the levels ``between``)."""
+    ends = {float(level_u), float(level_v)}
+    beside = {float(np.floor(end + 0.5)) for end in ends - set(between)}
+    return sorted(ends | beside)
+
+
+class IndoorBox:
+    """What the indoor view shows of ``indoor`` (an IndoorLayers).
+
+    Attributes
+    ----------
+    box : tuple
+        ``(west, south, east, north)`` in metres (see :func:`_view_box`).
+    shape : shapely.Polygon
+        The box.
+    indoor : IndoorLayers
+        The layers inside the box: the areas with a part in it, the walls and the edges
+        that cross it, the doors and the shops in it.
+    between : set
+        The levels that are not whole on which an area has its floor.
+    platform_floors : set
+        The keys of the platform areas that have a floor in the box: the outline of
+        such a platform, mapped as a closed way, is an edge that the view leaves out.
+    """
+
+    def __init__(self, indoor):
+        self.box = _view_box(indoor)
+        self.shape = shapely.box(*self.box)
+        self.indoor = replace(
+            indoor,
+            areas=_areas_inside(indoor.areas, self.shape),
+            walls=indoor.walls[indoor.walls.intersects(self.shape)],
+            doors=indoor.doors[indoor.doors.within(self.shape)],
+            pois=indoor.pois[indoor.pois.within(self.shape)],
+            edges=indoor.edges[indoor.edges.intersects(self.shape)],
+        )
+        self.between = floors_between_levels(self.indoor.areas)
+        self.platform_floors = _platform_floors(self.indoor.areas, self.shape)
+
+
+def indoor_stretch(box, low, high):
+    """How much taller than to scale the indoor view of ``box`` (west, south, east,
+    north in metres) draws its heights from ``low`` to ``high`` metres:
+    ``HEIGHT_STRETCH``, as far as its drawn height, 1 m under ``low`` to 2 m over
+    ``high``, then stays between ``_LOWEST_SHARE`` and ``_HIGHEST_SHARE`` of the
+    longest side of the box."""
+    west, south, east, north = box
+    longest = max(east - west, north - south)
+    tall = high - low + 3.0
+    share = min(_HIGHEST_SHARE, max(_LOWEST_SHARE, tall * HEIGHT_STRETCH / longest))
+    return share * longest / tall
+
+
+def _floor_groups(view, heights, origin, floor_height=None):
+    """The floors of the areas of ``view`` (an IndoorBox), a group for each kind of
+    ``AREA_STYLES``, in their order: on each level of
+    :func:`pyrosm3d.floors.floor_levels`, inside the box, open where
+    :func:`pyrosm3d.floors.floor_openings` says, at the height that ``heights`` gives
+    the level at the area, or that ``floor_height(polygon, level)`` gives (a height or
+    a function of the points), with outlines; a floor without a height is left
+    out."""
+    areas = view.indoor.areas
+    openings = floor_openings(view.indoor.edges)
+    items = {kind: [] for kind in AREA_STYLES}
+    columns = (areas["kind"], areas["levels"], areas["tags"], areas.geometry)
+    for key, kind, levels, tags, area in zip(element_keys(areas), *columns):
+        if kind not in AREA_STYLES:
+            continue
+        polygon = polygon_parts(_inside(area, view.shape))
+        spot = polygon.representative_point()
+        for level in floor_levels(kind, levels):
+            floor = polygon
+            if level in openings and polygon.intersects(openings[level]):
+                floor = polygon_parts(polygon.difference(openings[level]))
+            name = tags.get("name") or tags.get("ref")
+            what = (name, AREA_STYLES[kind][2], "%s · level %g" % (key, level))
+            text = "\n".join(filter(None, what))
+            if floor_height is None:
+                z = heights(spot.x, spot.y, level) - _FLOOR_DROP
+            else:
+                z = floor_height(polygon, level)
+            if not callable(z) and not np.isfinite(z):
+                continue
+            items[kind] += [
+                {"r": rings, "k": kind, "t": text, "l": float(level), "q": key}
+                for rings in polygon_rings(floor, z, origin)
+            ]
+    return [
+        dict(
+            name=name,
+            kind="floors",
+            colour=colour,
+            colours={kind: colour},
+            edge=OUTLINE_COLOUR,
+            alpha=235,
+            throughAlpha=170,
+            edgeAlpha=170,
+            edgeWidth=0.7,
+            plotEdge=_ROOM_OUTLINE,
+            visible=True,
+            items=items[kind],
+        )
+        for kind, (name, colour, _) in AREA_STYLES.items()
+    ]
+
+
+def _wall_items(walls, heights, origin):
+    """The walls of each level (``{level: panels}``, see
+    :func:`pyrosm3d.walls.wall_panels`) as items: each panel a thin block from the
+    height that ``heights`` gives its level at its middle, as high as the panel; a
+    panel a full storey high reaches the height of the next level."""
+    items = []
+    for level, panels in sorted(walls.items()):
+        for panel in panels:
+            start, end = panel[0, :2], panel[1, :2]
+            middle = (start + end) / 2
+            low = heights(middle[0], middle[1], level)
+            if not np.isfinite(low):
+                continue
+            tall = panel[2, 2] - panel[0, 2]
+            if tall >= FLOOR_HEIGHT - 0.01:
+                tall = heights(middle[0], middle[1], level + 1) - low
+                if not np.isfinite(tall):
+                    continue
+            along = (end - start) / np.hypot(*(end - start))
+            side = np.array([-along[1], along[0]]) * _WALL_THICKNESS / 2
+            corners = [start + side, end + side, end - side, start - side]
+            xy = np.array(corners + corners[:1]) - origin
+            ring = np.column_stack([xy, np.full(5, low)]).round(2).tolist()
+            items.append({"r": [ring], "h": round(float(tall), 2), "l": float(level)})
+    return items
+
+
+def _level_floor_items(floors, heights, origin):
+    """The floors under the outer walls (``{level: polygons}``, see
+    :func:`pyrosm3d.walls.outer_walls`) as items, under the floors of the areas on
+    their level."""
+    items = []
+    for level, polygons in sorted(floors.items()):
+        for polygon in polygons:
+            spot = polygon.representative_point()
+            z = heights(spot.x, spot.y, level) - _FLOOR_DROP - _LEVEL_FLOOR_DROP
+            if not np.isfinite(z):
+                continue
+            text = "Floor of level %g" % level
+            items += [
+                {"r": rings, "k": "level", "t": text, "l": float(level)}
+                for rings in polygon_rings(polygon, z, origin)
+            ]
+    return items
+
+
+def _column_groups(indoor, heights, origin):
+    """The stairwells and the lift shafts of ``indoor`` (an IndoorLayers) as see-through
+    columns, a group for each of the two (see :func:`pyrosm3d.columns.shaft_columns`):
+    from the height of the lowest floor of a column to wall height over its highest,
+    along the outline of its largest room."""
+    groups = []
+    for room, (name, colour, fallback) in COLUMN_STYLES.items():
+        items = []
+        for outline, bottom, top, levels, names, key in shaft_columns(indoor, room):
+            spot = outline.representative_point()
+            low = heights(spot.x, spot.y, bottom)
+            high = heights(spot.x, spot.y, top) + WALL_HEIGHT
+            if not np.isfinite(low + high):
+                continue
+            text = "%s\n%s · %s" % (
+                ", ".join(names) or fallback,
+                key,
+                levels_text(levels),
+            )
+            items += [
+                {"r": rings, "h": round(high - low, 2), "t": text, "q": key}
+                for rings in polygon_rings(outline, low, origin)
+            ]
+        groups.append(
+            dict(
+                name=name,
+                kind="glass",
+                colour=colour,
+                alpha=_COLUMN_ALPHA,
+                pickable=True,
+                visible=True,
+                items=items,
+            )
+        )
+    return groups
+
+
+def _point_group(points, style, lift, between, heights, origin):
+    """The ``points`` of a doors or pois layer as a group of points ``lift`` metres
+    over their floor on each of their whole levels and of the levels ``between``, off
+    at the start; ``style`` is ``DOOR_STYLE`` or ``POI_STYLE``."""
+    name, colour, fallback = style
+    items = []
+    columns = (points["levels"], points["tags"], points.geometry)
+    for key, levels, tags, point in zip(element_keys(points), *columns):
+        label = tags.get("name") or tags.get("shop") or tags.get("amenity") or fallback
+        for level in levels:
+            if float(level).is_integer() or level in between:
+                z = heights(point.x, point.y, level) + lift
+                if not np.isfinite(z):
+                    continue
+                place = [point.x - origin[0], point.y - origin[1], z]
+                items.append(
+                    {
+                        "c": [round(value, 2) for value in place],
+                        "t": "%s\n%s · level %g" % (label, key, level),
+                        "l": float(level),
+                        "q": key,
+                    }
+                )
+    width = 3.0 if style is DOOR_STYLE else 3.5
+    return dict(
+        name=name, kind="points", colour=colour, width=width, visible=False, items=items
+    )
+
+
+def _outline_items(paths, level, heights, origin):
+    """The lines through ``paths`` (xy arrays in metres) on ``level`` as items, under
+    the height that ``heights`` gives the level at the middle of each."""
+    items = []
+    for path in paths:
+        middle = path.mean(axis=0)
+        z = heights(middle[0], middle[1], level) - _OUTLINE_DROP
+        if not np.isfinite(z):
+            continue
+        points = np.column_stack([path - origin, np.full(len(path), z)])
+        items.append({"p": points.round(2).tolist(), "l": float(level)})
+    return items
+
+
+def _outline_groups(view, heights, origin):
+    """The outlines of the levels among the areas of ``view`` (an IndoorBox), on each
+    of their levels, and of the buildings drawn as lines (see
+    :func:`pyrosm3d.walls.building_outlines`), each a group for the indoor view
+    only."""
+    levels, buildings = [], []
+    areas = view.indoor.areas
+    for kind, on_levels, area in zip(areas["kind"], areas["levels"], areas.geometry):
+        if kind == "level":
+            paths = [
+                shapely.get_coordinates(line)
+                for line in _inside(area.boundary, view.shape)
+            ]
+            for level in on_levels:
+                levels += _outline_items(paths, level, heights, origin)
+    for level, paths in sorted(building_outlines(view.indoor, view.shape).items()):
+        buildings += _outline_items(paths, level, heights, origin)
+    found = (("Level outlines", _LEVEL_OUTLINE, levels),)
+    found += (("Building outlines", _BUILDING_OUTLINE, buildings),)
+    return [
+        dict(
+            name=name,
+            kind="outlines",
+            only="indoor",
+            colour=LEVEL_OUTLINE_COLOUR,
+            width=width,
+            visible=True,
+            items=items,
+        )
+        for name, width, items in found
+    ]
+
+
+def indoor_groups(view, origin, heights=level_heights, floor_height=None):
+    """The groups of the indoor elements of ``view`` (an IndoorBox), in metres from
+    ``origin`` (x, y in the metres of the layers) at the heights ``(x, y, level) ->
+    metres`` that ``heights`` gives (see the module docstring), the floors at those of
+    ``floor_height`` where it is given (see :func:`_floor_groups`); what has no height
+    and groups without items are left out."""
+    origin = np.asarray(origin, dtype=float)
+    indoor = view.indoor
+    outer, level_floors = outer_walls(indoor, view.shape)
+    walls = (
+        (WALL_NAME, None, True, _wall_items(inner_walls(indoor), heights, origin)),
+        (OUTER_WALL_NAME, "indoor", False, _wall_items(outer, heights, origin)),
+    )
+    groups = _floor_groups(view, heights, origin, floor_height) + _outline_groups(
+        view, heights, origin
+    )
+    for name, only, visible, items in walls:
+        group = dict(
+            name=name,
+            kind="glass",
+            colour=WALL_COLOUR,
+            alpha=_WALL_ALPHA,
+            visible=visible,
+            items=items,
+        )
+        groups.append(dict(group, only=only) if only else group)
+    groups.append(
+        dict(
+            name="Level floors",
+            kind="floors",
+            only="indoor",
+            colour=LEVEL_FLOOR_COLOUR,
+            colours={"level": LEVEL_FLOOR_COLOUR},
+            edge=OUTLINE_COLOUR,
+            alpha=255,
+            throughAlpha=255,
+            edgeAlpha=0,
+            edgeWidth=0,
+            plotEdge=0,
+            visible=False,
+            items=_level_floor_items(level_floors, heights, origin),
+        )
+    )
+    groups += _column_groups(indoor, heights, origin)
+    for points, style, lift in (
+        (indoor.doors, DOOR_STYLE, _DOOR_LIFT),
+        (indoor.pois, POI_STYLE, _POI_LIFT),
+    ):
+        groups.append(_point_group(points, style, lift, view.between, heights, origin))
+    return [group for group in groups if group["items"]]
+
+
+def plot_indoor(
+    elements,
+    edges=None,
+    nodes=None,
+    buildings=None,
+    level=None,
+    building_parts=None,
+    dem=None,
+):
+    """A 3D view of indoor elements (see the module docstring), from frames read with
+    pyrosm (``osm`` is a ``pyrosm.OSM`` object); ``osm.in3d.plot_indoor()`` makes
+    these reads itself.
+
+    Parameters
+    ----------
+    elements : GeoDataFrame
+        ``osm.get_indoor_elements(walking_areas=True)``. The view shows the areas
+        and what lies within 10 m of them; a walking area, such as a square or a
+        pedestrian street, is drawn as far as the other areas' view reaches.
+    edges, nodes : GeoDataFrame (optional)
+        ``osm.get_network("walking", nodes=True, indoor_elements=True,
+        walking_areas=True)``, drawn on its levels.
+    buildings : GeoDataFrame (optional)
+        ``osm.get_buildings()``: their outlines in the indoor view, and in the solid
+        model and the see-through map the buildings that reach into the view as
+        blocks and as footprints (see :mod:`pyrosm3d.buildings`).
+    level : float (optional)
+        The level that the indoor view opens on; by default all levels.
+    building_parts : GeoDataFrame (optional)
+        The building parts of
+        ``osm.get_data_by_custom_criteria({"building:part": True})``: a building with
+        parts is drawn by those that have a height and by what they leave of it.
+    dem : str or pathlib.Path, a sequence of them, or a function (optional)
+        A terrain model, as :func:`pyrosm3d.plot_network` takes it. The levels are
+        then at heights in metres (see :class:`pyrosm3d.indoor_view.LevelHeights`): in
+        a building at the heights of the network's nodes on them, outside buildings
+        on the terrain; the edges at the heights of
+        :func:`pyrosm3d.heights.network_heights`, those without heights left out;
+        the ground and the buildings on the terrain. What has no height is left out.
+
+    Returns
+    -------
+    pyrosm3d.View
+        In a notebook the view is the output of the cell; ``view.to_html(path)`` writes
+        it as a page and ``view.show()`` shows it. It opens in the indoor view, where
+        one level or all can be picked, with the heights drawn taller unless "True
+        heights" is on; a level is drawn 4 m from the next above the ground floor and
+        6 m below it. The outer walls, the doors and the shops are off until they are
+        switched on in the list of layers. The solid model and the see-through map
+        show the elements on a flat ground at street level, or on the terrain.
+    """
+    if dem is not None and edges is not None:
+        edges = network_heights(edges, dem)
+        edges = edges[shapely.has_z(edges.geometry.to_numpy())]
+    indoor = indoor_layers(elements, nodes, edges, buildings)
+    return layers_view(indoor, level, (buildings, building_parts), dem)
+
+
+def _levels_of(groups):
+    """The levels of the items of ``groups``: an item's level, or the levels that the
+    indoor view shows a line on."""
+    found = set()
+    for group in groups:
+        for item in group["items"]:
+            if "l" in item:
+                found.add(item["l"])
+            elif group["kind"] == "lines":
+                found.update(item.get("ls", [item.get("a", 0.0)]))
+    return found
+
+
+def _points_of(groups):
+    """The points of the items of ``groups``, as a list of paths: the lines, the outer
+    rings of the polygons and the points."""
+    paths = []
+    for group in groups:
+        for item in group["items"]:
+            if "p" in item:
+                paths.append(item["p"])
+            elif "r" in item:
+                paths.append(item["r"][0])
+            else:
+                paths.append([item["c"]])
+    return paths
+
+
+def layers_view(indoor, level=None, building_frames=(), dem=None):
+    """The view of :func:`plot_indoor` for the layers ``indoor`` (an IndoorLayers, see
+    :func:`pyrosm3d.indoor.indoor_layers`): the groups of :func:`indoor_groups` and
+    the walking network in metres from the middle of the indoor view's box; the
+    platform edges of the platforms with a floor are left out. The level picker lists
+    the whole levels and those between them with floors, apart from what only doors
+    and shops are on. The buildings of ``building_frames`` (see
+    :func:`pyrosm3d.buildings.frame_building_groups`) that reach into the box stand on
+    the ground of the city views; the start view is that of the indoor elements.
+    With the terrain model ``dem`` the levels are at the heights of
+    :class:`LevelHeights`, the edges at their own heights in metres, and the ground
+    and the buildings on the terrain. Raises a ValueError for a ``level`` that it does
+    not list, and when nothing has a height."""
+    shown = IndoorBox(indoor)
+    west, south, east, north = shown.box
+    origin = ((west + east) / 2, (south + north) / 2)
+    in_metres = dem is not None
+    terrain = _terrain(indoor.areas.crs, dem) if in_metres else _street_level
+    heights = LevelHeights(indoor, terrain) if in_metres else level_heights
+    lines = _NetworkLines(in_metres=in_metres)
+    edges = shown.indoor.edges
+    ground = _ground_under(edges, dem)
+    kinds = zip(element_keys(edges), _edge_kinds(edges))
+    for at, (key, (row, tags, kind, level_u, level_v)) in enumerate(kinds):
+        if kind == "platform" and key in shown.platform_floors:
+            continue
+        points = _edge_points(row.geometry, kind, level_u, level_v, origin, in_metres)
+        on_levels = shown_levels(level_u, level_v, shown.between)
+        lines.add(
+            kind,
+            row,
+            tags,
+            level_u,
+            level_v,
+            np.column_stack(points),
+            ground[at],
+            on_levels,
+        )
+    floors = heights.floor if in_metres else None
+    drawn = indoor_groups(shown, origin, heights, floors)
+    points = [group for group in drawn if group["kind"] == "points"]
+    groups = [group for group in drawn if group["kind"] != "points"]
+    groups += lines.groups() + points
+    shapes = [group for group in groups if group["kind"] != "points"]
+    picked = sorted(
+        found
+        for found in _levels_of(shapes)
+        if float(found).is_integer() or found in shown.between
+    )
+    if level is not None and float(level) not in picked:
+        raise ValueError("plot_indoor got nothing to draw on level %g." % level)
+    areas = shown.indoor.areas
+    floors = areas[areas["kind"].isin(list(AREA_STYLES))]["levels"]
+    counts = {found: sum(found in on for on in floors) for found in picked}
+    every = sorted(_levels_of(groups))
+    if not every:
+        raise ValueError("plot_indoor found no heights in the terrain model.")
+    under = float(terrain(np.array([origin[0]]), np.array([origin[1]]))[0])
+    under = under if np.isfinite(under) else 0.0
+
+    def level_height(found):
+        """The height of the level ``found`` at the middle of the box."""
+        height = heights(origin[0], origin[1], found)
+        return height if np.isfinite(height) else under + level_heights(0, 0, found)
+
+    low, high = (level_height(found) for found in (every[0], every[-1]))
+    corners = (west - origin[0], south - origin[1], east - origin[0], north - origin[1])
+    paths = _points_of(groups)
+    ground_at = _ground_at_middle(indoor.areas.crs, origin, dem)
+    view, fit = _start_view(paths, ground_at, turned=False, radius=None)
+    blocks = frame_building_groups(
+        building_frames,
+        indoor.areas.crs,
+        origin,
+        terrain,
+        keep=lambda shapes: shapely.intersects(shapes, shown.shape),
+    )
+    footprints = _points_of(blocks)
+    if in_metres:
+        ground_group = _terrain_ground(paths, footprints, terrain, origin)
+    else:
+        ground_group = _flat_ground(paths + footprints)
+    data = dict(
+        mode="indoor",
+        view=view,
+        fit=fit,
+        stretch=HEIGHT_STRETCH,
+        tables=dict(lines.tables(), elements=_element_table(indoor, groups)),
+        indoor=dict(
+            box=[round(value, 1) for value in corners],
+            levels=[
+                [found, round(level_height(found), 1), counts[found]]
+                for found in picked
+            ],
+            ground=round(under, 1),
+            background=BACKGROUND_COLOUR,
+            stretch=round(indoor_stretch(shown.box, low, high), 3),
+        ),
+        groups=[ground_group] + blocks + groups,
+    )
+    if level is not None:
+        data["indoor"]["level"] = float(level)
+    about = (
+        "The indoor elements of a place at their levels: the floors of the areas, "
+        "walls, stairwells and lift shafts, and the walking network."
+    )
+    return View(data, title="Indoor elements", about=about)
+
+
+def to_html(
+    elements,
+    path,
+    edges=None,
+    nodes=None,
+    buildings=None,
+    title="Indoor elements",
+    deck_gl=DECK_GL,
+    building_parts=None,
+    dem=None,
+):
+    """Write the 3D view of indoor elements as a web page, from frames read with
+    pyrosm; ``osm.in3d.to_html(path)`` makes these reads itself.
+
+    The page is that of :func:`plot_indoor`: the level picker names the number of
+    areas on each level, and a tap on an area, a line of the network, a door, a shop
+    or a stairwell or lift column says what the element is, lists its OpenStreetMap
+    tags, apart from contact details such as ``email`` and ``phone``, and links to
+    it.
+
+    Parameters
+    ----------
+    elements : GeoDataFrame
+        ``osm.get_indoor_elements(walking_areas=True)``.
+    path : str or pathlib.Path
+        The HTML file to write.
+    edges, nodes : GeoDataFrame (optional)
+        ``osm.get_network("walking", nodes=True, indoor_elements=True,
+        walking_areas=True)``.
+    buildings : GeoDataFrame (optional)
+        ``osm.get_buildings()``.
+    title : str
+        The title of the page.
+    deck_gl : str
+        Where the page loads the deck.gl library from (see
+        :meth:`pyrosm3d.View.to_html`).
+    building_parts : GeoDataFrame (optional)
+        ``osm.get_data_by_custom_criteria({"building:part": True})``.
+    dem : str or pathlib.Path, a sequence of them, or a function (optional)
+        A terrain model (see :func:`plot_indoor`).
+
+    Returns
+    -------
+    pathlib.Path
+        The file written.
+    """
+    view = plot_indoor(
+        elements, edges, nodes, buildings, building_parts=building_parts, dem=dem
+    )
+    view.title = title
+    return view.to_html(path, deck_gl=deck_gl)
+
+
+def element_notes(indoor):
+    """``{key: note}`` of the elements of ``indoor`` (an IndoorLayers): what an element
+    is and the levels it is on, such as ``"room · levels 1, 2"`` or ``"stairs · levels
+    0 → 1"`` (the lowest and the highest level of the element's edges). An area's note
+    stands also for the edges that carry its key."""
+    notes, ends = {}, {}
+    kinds = zip(element_keys(indoor.edges), _edge_kinds(indoor.edges))
+    for key, (_, _, kind, level_u, level_v) in kinds:
+        low, high = sorted((level_u, level_v))
+        _, lowest, highest = ends.get(key, (kind, low, high))
+        ends[key] = (kind, min(low, lowest), max(high, highest))
+    for key, (kind, low, high) in ends.items():
+        notes[key] = "%s · %s" % (EDGE_NAMES[kind], end_levels_text(low, high))
+    areas = indoor.areas
+    columns = (areas["kind"], areas["levels"])
+    for key, kind, levels in zip(element_keys(areas), *columns):
+        name = AREA_STYLES[kind][2] if kind in AREA_STYLES else kind
+        notes[key] = "%s · %s" % (name, levels_text(levels))
+    for layer, style in ((indoor.doors, DOOR_STYLE), (indoor.pois, POI_STYLE)):
+        for key, levels in zip(element_keys(layer), layer["levels"]):
+            notes[key] = "%s · %s" % (style[2], levels_text(levels))
+    return notes
+
+
+def _is_contact(key):
+    """Whether the tag ``key`` holds contact details: ``email``, ``phone``, ``fax``,
+    ``mobile`` or a ``contact:`` key."""
+    return key in _CONTACT_KEYS or key.startswith("contact:")
+
+
+def _element_table(indoor, groups):
+    """The elements that the items of ``groups`` belong to, as ``[key, note, tags]``
+    (see :func:`element_notes`), in the order in which the items first name them: an
+    item's own key (``q``), or the way, relation or node of a line of the network.
+    Each item's ``q`` becomes the number of its element in the table; an element
+    without tags is not listed. The tags leave out contact details (see
+    :func:`_is_contact`)."""
+    tags = dict(zip(element_keys(indoor.edges), row_tags(indoor.edges)))
+    for layer in (indoor.areas, indoor.doors, indoor.pois):
+        tags.update(zip(element_keys(layer), layer["tags"]))
+    notes = element_notes(indoor)
+    table, numbers = [], {}
+    for group in groups:
+        for item in group.get("items", []):
+            key = item.pop("q", None)
+            if key is None and "w" in item:
+                key = "%s %s" % (
+                    ("way", "relation", "node")[item.get("e", 0)],
+                    item["w"],
+                )
+            if not tags.get(key):
+                continue
+            if key not in numbers:
+                numbers[key] = len(table)
+                listed = {
+                    name: str(value)
+                    for name, value in tags[key].items()
+                    if not _is_contact(name)
+                }
+                table.append([key, notes.get(key, ""), listed])
+            item["q"] = numbers[key]
+    return table

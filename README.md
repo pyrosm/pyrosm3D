@@ -23,11 +23,11 @@ from pyrosm import OSM
 # An OpenStreetMap PBF file (.osm.pbf) and a box around one building: west, south, east, north
 osm = OSM("Helsinki.osm.pbf", bounding_box=[24.9295, 60.2297, 24.9364, 60.2325])
 
-figure = osm.in3d.plot_indoor()            # a plotly figure of all levels
-figure.show()
+view = osm.in3d.plot_indoor()              # a deck.gl view of all levels
+view.show()
 
-osm.in3d.plot_indoor(level=1).show()       # one level
-osm.in3d.to_html("building.html")          # a web page with level buttons
+osm.in3d.plot_indoor(level=1).show()       # opened on one level
+osm.in3d.to_html("building.html")          # the view as a web page
 osm.in3d.plot_network().show()             # the walking network alone, each edge at its levels
 ```
 
@@ -44,6 +44,7 @@ dem = "elevation.tif"                          # a raster of ground heights that
 
 nodes, edges = osm.in3d.get_network(dem=dem)   # the edges with u_height and v_height
 osm.in3d.plot_network(dem=dem).show()          # the network drawn in metres
+osm.in3d.plot_indoor(dem=dem).show()           # the indoor view in metres
 ```
 
 `dem` takes a raster file such as a GeoTIFF, a list of tiles, or a function `(longitudes, latitudes) -> heights`. pyrosm3d bundles and downloads no terrain data. Reading a raster file needs rasterio, which the `dem` extra installs:

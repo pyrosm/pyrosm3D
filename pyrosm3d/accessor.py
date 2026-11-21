@@ -1,9 +1,9 @@
 """The ``in3d`` accessor of ``pyrosm.OSM``: 3D views of what an OSM object reads."""
 
-from pyrosm3d.figure import plot_indoor
 from pyrosm3d.heights import network_heights
+from pyrosm3d.indoor_view import plot_indoor, to_html
 from pyrosm3d.network import plot_network
-from pyrosm3d.page import to_html
+from pyrosm3d.view import DECK_GL
 
 
 class In3D:
@@ -26,38 +26,55 @@ class In3D:
     def _indoor_frames(self):
         """The frames of the indoor views, from the reads of the OSM object: its indoor
         elements with the walking areas, the walking network with indoor elements and
-        walking areas, and the buildings; as the arguments of
+        walking areas, and the buildings with their parts; as the arguments of
         :func:`pyrosm3d.plot_indoor`."""
         osm = self._osm
         nodes, edges = osm.get_network(
             "walking", nodes=True, indoor_elements=True, walking_areas=True
         )
         elements = osm.get_indoor_elements(walking_areas=True)
-        buildings = osm.get_buildings()
-        return dict(elements=elements, edges=edges, nodes=nodes, buildings=buildings)
+        buildings, parts = self._buildings()
+        return dict(
+            elements=elements,
+            edges=edges,
+            nodes=nodes,
+            buildings=buildings,
+            building_parts=parts,
+        )
 
-    def plot_indoor(self, level=None):
-        """A plotly Figure of the indoor elements in 3D: the floors of rooms,
-        corridors, platforms and walking areas at their levels, walls with door gaps,
-        the columns of stairwells and lift shafts, and the walking network.
+    def _buildings(self):
+        """``(buildings, parts)`` of the OSM object: ``get_buildings()`` and its
+        ``building:part`` areas (None without any)."""
+        parts = self._osm.get_data_by_custom_criteria(
+            {"building:part": True}, keep_nodes=False
+        )
+        return self._osm.get_buildings(), parts
+
+    def plot_indoor(self, level=None, dem=None):
+        """A 3D view of the indoor elements: the floors of rooms, corridors, platforms
+        and walking areas at their levels, walls with door gaps, the columns of
+        stairwells and lift shafts, and the walking network, with the buildings
+        around them in the solid model and the see-through map.
 
         Parameters
         ----------
         level : float (optional)
-            Draw only what is on this level, without the columns of stairwells and
-            lift shafts; by default all levels.
+            The level that the indoor view opens on; by default all levels.
+        dem : str or pathlib.Path, a sequence of them, or a function (optional)
+            A terrain model, as :meth:`get_network` takes it: the levels are then at
+            heights in metres (see :func:`pyrosm3d.plot_indoor`).
 
         Returns
         -------
-        plotly.graph_objects.Figure
-            The figure of :func:`pyrosm3d.plot_indoor`.
+        pyrosm3d.View
+            The view of :func:`pyrosm3d.plot_indoor`.
         """
-        return plot_indoor(**self._indoor_frames(), level=level)
+        return plot_indoor(**self._indoor_frames(), level=level, dem=dem)
 
-    def to_html(self, path, title="Indoor elements", include_plotlyjs=True):
-        """Write a web page with the 3D view of the indoor elements: the figure of
-        :meth:`plot_indoor` with a button for each level and the OpenStreetMap tags of
-        a clicked element.
+    def to_html(self, path, title="Indoor elements", deck_gl=DECK_GL, dem=None):
+        """Write the 3D view of the indoor elements of :meth:`plot_indoor` as a web
+        page, in which the level picker names the number of areas on each level and a
+        tapped element shows its OpenStreetMap tags.
 
         Parameters
         ----------
@@ -65,22 +82,19 @@ class In3D:
             The HTML file to write.
         title : str
             The title of the page.
-        include_plotlyjs : bool or "cdn"
-            With True (the default) the page holds plotly's JavaScript, so it works
-            without a network connection and is about 5 MB larger. With ``"cdn"`` the
-            page loads the library from plotly's content delivery network.
+        deck_gl : str
+            Where the page loads the deck.gl library from (see
+            :meth:`pyrosm3d.View.to_html`).
+        dem : str or pathlib.Path, a sequence of them, or a function (optional)
+            A terrain model (see :meth:`plot_indoor`).
 
         Returns
         -------
         pathlib.Path
             The file written, as :func:`pyrosm3d.to_html` writes it.
         """
-        return to_html(
-            path=path,
-            title=title,
-            include_plotlyjs=include_plotlyjs,
-            **self._indoor_frames(),
-        )
+        frames = self._indoor_frames()
+        return to_html(path=path, title=title, deck_gl=deck_gl, dem=dem, **frames)
 
     def _network(self, network_type, **read_options):
         """The nodes and edges of ``get_network(network_type, nodes=True,
@@ -131,6 +145,7 @@ class In3D:
         route=None,
         graph=None,
         dem=None,
+        buildings=False,
     ):
         """A 3D view of the network with its indoor elements: the edges at their levels,
         with stairs, escalators, lifts and platforms told apart.
@@ -156,6 +171,9 @@ class In3D:
         dem : str or pathlib.Path, a sequence of them, or a function (optional)
             A terrain model, as :meth:`get_network` takes it. The network is then
             drawn at heights in metres, not at its levels.
+        buildings : bool
+            Read and draw the buildings with their parts too (see
+            :func:`pyrosm3d.plot_network`).
 
         Returns
         -------
@@ -163,6 +181,8 @@ class In3D:
             The view of :func:`pyrosm3d.plot_network`.
         """
         view = dict(center=center, radius=radius, route=route, dem=dem)
+        if buildings:
+            view["buildings"], view["building_parts"] = self._buildings()
         if graph is not None:
             return plot_network(graph, **view)
         nodes, edges = self._network(network_type)

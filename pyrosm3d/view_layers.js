@@ -1,5 +1,5 @@
 // The deck.gl layers of a page of pyrosm3d: each group of the page's data (the ground,
-// floors, outlines, see-through walls, lines and points; all in metres from the middle
+// buildings, floors, outlines, see-through walls, lines and points; all in metres from the middle
 // of the data, x east, y north, z up) as the layers that draw it in one of the page's
 // views: the solid model, the see-through map, or the indoor view.
 (function (view) {
@@ -19,16 +19,36 @@
     return outlines.get(items);
   }
 
+  // The footprint of a building: its rings on the ground under it (g). Kept on the item
+  function footprintOf(item) {
+    item.f = item.f || item.r.map((ring) => ring.map((point) => [point[0], point[1], item.g]));
+    return item.f;
+  }
+
+  // The outlines of the blocks of items: of their footprints onGround, else of the
+  // roofs of the buildings, not of their parts. Kept for each list of items
+  const edges = new WeakMap();
+  function edgesOf(items, onGround) {
+    if (!edges.has(items)) edges.set(items, {});
+    const kept = edges.get(items);
+    const which = onGround ? "ground" : "roofs";
+    const raised = (item) => item.r.map((ring) => ring.map((point) => [point[0], point[1], point[2] + item.h]));
+    kept[which] =
+      kept[which] ||
+      (onGround ? items.flatMap(footprintOf) : items.filter((item) => !item.part).flatMap(raised));
+    return kept[which];
+  }
+
   // The views of a page: the solid model, the see-through map, and on a page with
   // indoor elements the indoor view
   const SOLID = "solid";
   const THROUGH = "through";
   const INDOOR = "indoor";
 
-  // Whether a view draws a group: the indoor view leaves out the ground, and a group
-  // can be for one view only
+  // Whether a view draws a group: the indoor view leaves out the ground and the
+  // buildings, and a group can be for one view only
   function drawnIn(group, mode) {
-    if (mode === INDOOR && group.kind === "ground") return false;
+    if (mode === INDOOR && (group.kind === "ground" || group.kind === "buildings")) return false;
     return !group.only || group.only === mode;
   }
 
@@ -143,9 +163,11 @@
 
   // The deck.gl layers of a group of the data in a view; none when the group is
   // switched off in shown (a Map of groups) or the view does not draw it.
-  // Solid: the ground hides what is below it. See-through: a map with the network
-  // over and under it; the ground, the floors and the outlines hide nothing. Indoor:
-  // no ground; the floors are opaque plates, only the items on the picked level are
+  // Solid: the ground and the buildings hide what is below, behind and inside them.
+  // See-through: a map with the network over and under it; the buildings lie on the
+  // ground as footprints, and the ground, the footprints, the floors and the outlines
+  // hide nothing. Indoor: no ground and no buildings; the floors are opaque plates,
+  // only the items on the picked level are
   // drawn when there is one. Heights are drawn stretch times taller than to scale. A
   // group of glass (the walls of rooms, stairwells, lift shafts) is see-through blocks
   // in all three, which hide nothing themselves.
@@ -171,6 +193,38 @@
           })
         ),
       ];
+    }
+    if (group.kind === "buildings") {
+      const through = mode === THROUGH;
+      const edge = new deck.PathLayer(
+        Object.assign({}, placed, {
+          id: (through ? "footprint-edges-" : "roofs-") + group.name,
+          data: edgesOf(items, through),
+          getPath: (ring) => ring,
+          getColor: colour(group.edge, group.edgeAlpha),
+          getWidth: group.edgeWidth,
+          widthUnits: "pixels",
+          billboard: true,
+          parameters: hidesNothing,
+        })
+      );
+      const fill = through
+        ? { id: "footprints-" + group.name, getPolygon: footprintOf, stroked: false, parameters: hidesNothing }
+        : {
+            id: "buildings-" + group.name,
+            getPolygon: (item) => item.r,
+            extruded: true,
+            getElevation: (item) => item.h,
+            material: { ambient: 0.5, diffuse: 0.8, shininess: 2, specularColor: [20, 20, 20] },
+          };
+      const blocks = new deck.PolygonLayer(
+        Object.assign({}, placed, fill, {
+          data: items,
+          getFillColor: colour(group.colour, through ? 255 : group.alpha),
+          pickable: true,
+        })
+      );
+      return [blocks, edge];
     }
     if (group.kind === "floors") {
       const alpha = indoor ? 255 : mode === THROUGH ? group.throughAlpha : group.alpha;
@@ -265,7 +319,7 @@
   // first, as its ground hides nothing, then what is on and in it, where what is in
   // front still hides what is behind. In the other views the groups keep their order,
   // but the points come last, so that nothing is drawn over them
-  const DRAWN = { ground: 0, floors: 2, outlines: 2, glass: 3, lines: 4, points: 5 };
+  const DRAWN = { ground: 0, buildings: 1, floors: 2, outlines: 2, glass: 3, lines: 4, points: 5 };
   const POINTS_LAST = { points: 1 };
 
   // The layers of the data in a view ("solid", "through" or "indoor") of the groups

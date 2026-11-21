@@ -31,11 +31,15 @@ function between(text, opening, closing) {
 }
 
 const elements = {};
+// An element of the page: setting its text replaces its children, as in a browser,
+// and its text holds theirs
 function element(id) {
   return {
     id,
     hidden: false,
-    textContent: "",
+    own: "",
+    get textContent() { return this.own + this.children.map((child) => child.textContent).join(""); },
+    set textContent(text) { this.own = String(text); this.children = []; },
     value: "",
     checked: false,
     disabled: false,
@@ -132,6 +136,7 @@ function noted(extra) {
       layers: (props.layers || []).map(layerNote),
       viewState: props.viewState || null,
       info: byId("info").hidden ? null : byId("info").textContent,
+      links: byId("info").children.map((child) => child.href),
       error: byId("error").hidden ? null : byId("error").textContent,
       background: byId("stage").style.background || "",
       controls: controlsNote(),

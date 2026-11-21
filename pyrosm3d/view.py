@@ -7,6 +7,8 @@ The data of a view is a dict that the page script reads:
     page's list of layers, one name for each group), a ``kind``, a ``colour``
     (``"#rrggbb"``), whether it is ``visible`` at the start, and the style of its kind.
     The kinds: ``ground`` (a ``grid`` of heights, or ``items`` with rings ``r``),
+    ``buildings`` (blocks: rings ``r`` at the bottom, a height ``h``, the height of
+    the ground ``g`` for the footprint, ``part`` for the part of a building),
     ``floors`` (rings ``r`` of a kind ``k`` among the group's ``colours``),
     ``outlines`` and ``lines`` (paths ``p``), ``glass`` (see-through blocks: rings
     ``r`` and a height ``h``) and ``points`` (a place ``c``). Points are ``[x, y, z]``
@@ -16,7 +18,10 @@ The data of a view is a dict that the page script reads:
     indoor view (``plot``: colour, width in pixels and dash) is on there at the start.
 ``tables``
     The texts that the items of the network refer to by number: ``names`` and
-    ``highways``.
+    ``highways``; and the ``elements`` that items refer to by number (``q``), each
+    ``[key, note, tags]``: a key such as ``"way 123"``, what the element is and its
+    OpenStreetMap tags without contact details, which a tap on an item shows with a
+    link to the element.
 ``view``
     Where the camera starts: deck.gl's view state of an orbit view (``target``,
     ``rotationX``, ``rotationOrbit``, ``zoom``) and its limits (``minZoom``,
@@ -33,8 +38,10 @@ The data of a view is a dict that the page script reads:
     ground; the floors are plates, and the heights are drawn taller).
 ``indoor``
     On a page with indoor elements: the ``box`` of the indoor view, its ``levels``
-    (each a level and its height), the height of the ``ground``, its ``background``
-    colour and how much taller than to scale it draws the heights (``stretch``).
+    (each a level, its height and the number of areas on it), the height of the
+    ``ground``, its ``background``
+    colour, how much taller than to scale it draws the heights (``stretch``) and,
+    optionally, the ``level`` that it opens on.
 """
 
 import html
@@ -45,12 +52,22 @@ import webbrowser
 from importlib import resources
 from pathlib import Path
 
+import numpy as np
+import shapely
+
 # The deck.gl library that the pages load
 DECK_GL = "https://cdn.jsdelivr.net/npm/deck.gl@8.9.35/dist.min.js"
 # The scripts of a page, in the order they run
 _SCRIPTS = ("view_layers.js", "view_walk.js", "view_camera.js", "view_page.js")
 # Pixels that the frame of a view is high in a notebook
 _FRAME_HEIGHT = 620
+# The frame runs the page's scripts and opens its links in a window of their own, but
+# shares nothing with the notebook
+_FRAME_SANDBOX = "allow-scripts allow-popups allow-popups-to-escape-sandbox"
+# The characters at which a notebook splits a line of an output, but U+0085, which a
+# character reference cannot write (HTML reads &#133; as an ellipsis): the page's data
+# writes it as a JSON escape, and its title and about text as a line break
+_LINE_BREAKS = re.compile("[\n\r\x0b\x0c\x1c\x1d\x1e\u2028\u2029]")
 
 
 def package_text(name):
@@ -60,9 +77,41 @@ def package_text(name):
 
 def _script_json(data):
     """``data`` as JSON that can stand in a script element of a page: the characters
-    that could end the element or start markup are written as escapes."""
+    that could end the element or start markup, and those that break a line, are
+    written as escapes."""
     text = json.dumps(data, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-    return text.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+    for character in "<>&\x85\u2028\u2029":
+        text = text.replace(character, "\\u%04x" % ord(character))
+    return text
+
+
+def polygon_parts(shape):
+    """The polygons of ``shape``, a geometry or a list of them, also inside
+    collections, as a MultiPolygon: empty where there are none (no shape, a point, a
+    line, or a polygon that has collapsed)."""
+    parts = shapely.get_parts(shape)
+    while np.isin(shapely.get_type_id(parts), [4, 5, 6, 7]).any():  # multi, collection
+        parts = shapely.get_parts(parts)
+    return shapely.MultiPolygon(
+        [part for part in parts if part.geom_type == "Polygon" and part.area > 0]
+    )
+
+
+def polygon_rings(shape, z, origin, decimals=2):
+    """The rings of each polygon of ``shape`` (in metres) as items of a view take
+    them: for each polygon a list of rings, each a list of ``[x, y, z]`` points in
+    metres from ``origin``, rounded to ``decimals``. ``z`` is a height, or a function
+    ``(x, y) -> heights`` at points in the metres of ``shape``."""
+    found = []
+    for polygon in shapely.get_parts(shape):
+        rings = []
+        for ring in (polygon.exterior, *polygon.interiors):
+            xy = shapely.get_coordinates(ring)
+            heights = z(xy[:, 0], xy[:, 1]) if callable(z) else np.full(len(xy), z)
+            points = np.column_stack([xy - origin, heights])
+            rings.append(points.round(decimals).tolist())
+        found.append(rings)
+    return found
 
 
 def _check_names(data):
@@ -114,8 +163,8 @@ class View:
         """
         _check_names(self.data)
         values = {
-            "TITLE": html.escape(self.title),
-            "ABOUT": html.escape(self.about),
+            "TITLE": html.escape(self.title.replace("\x85", "\n")),
+            "ABOUT": html.escape(self.about.replace("\x85", "\n")),
             "DECK_GL": html.escape(deck_gl),
             "DATA": _script_json(self.data),
             "SCRIPT": "\n".join(package_text(name) for name in _SCRIPTS),
@@ -132,11 +181,17 @@ class View:
         return path
 
     def _repr_html_(self):
-        """The view as the output of a notebook cell: a frame that holds the page."""
+        """The view as the output of a notebook cell: a sandboxed frame that holds the
+        page (see ``_FRAME_SANDBOX``) and sends no referrer, on one line: the
+        characters that break a line are written as character references."""
+        page = _LINE_BREAKS.sub(
+            lambda found: "&#%d;" % ord(found[0]),
+            html.escape(self.to_html(), quote=True),
+        )
         return (
-            '<iframe srcdoc="%s" style="width: 100%%; height: %dpx; border: none" '
-            'allow="fullscreen"></iframe>'
-            % (html.escape(self.to_html(), quote=True), _FRAME_HEIGHT)
+            '<iframe srcdoc="%s" sandbox="%s" referrerpolicy="no-referrer" '
+            'style="width: 100%%; height: %dpx; border: none" allow="fullscreen">'
+            "</iframe>" % (page, _FRAME_SANDBOX, _FRAME_HEIGHT)
         )
 
     def show(self):
